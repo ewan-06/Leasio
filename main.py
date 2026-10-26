@@ -55,7 +55,7 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
         # NOTE: If your Conduit columns are named slightly differently 
         # (e.g., Manufacturer instead of Make), change c.Make, c.Model, etc. below!
         cursor.execute("""
-            SELECT c.CAP_Code, c.Derivative 
+            SELECT c.CAP_Code, c.CAP_Derivative 
             FROM dbo.Conduit c
             WHERE c.Manufacturer = %s 
               AND c.Model = %s 
