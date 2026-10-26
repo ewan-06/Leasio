@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import pymssql
+import pymssql 
 import os
 
 app = FastAPI()
@@ -13,11 +13,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 1. THE CALCULATOR ENDPOINT
 @app.get("/api/calculate")
 async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
-        
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
             user="ewan_leasio",
@@ -28,17 +28,17 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int
         cursor = conn.cursor()
         cursor.execute("SELECT dbo.MonthlyRentalFunc(%s, %d, %d, %d)", 
                        (cap_code, term, mileage, initial))
-        
         result = cursor.fetchone()
         
         if result and result[0] is not None:
-            return {"valuation": f"{result[0]:,.2f}"}
+            return {"valuation": f"£{result[0]:,.2f}"}
         else:
             return {"error": "No valuation found."}
             
     except Exception as e:
         return {"error": str(e)}
 
+# 2. THE VEHICLE SEARCH ENDPOINT
 @app.get("/api/get_types")
 async def get_vehicle_types(make: str, model: str, fuel: str):
     try:
@@ -51,11 +51,20 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
         )
         
         cursor = conn.cursor()
-        # Update "Derivative", "Make", "Model", "Fuel" to match your exact SQL column names
+        
+        # NOTE: If your Conduit columns are named slightly differently 
+        # (e.g., Manufacturer instead of Make), change c.Make, c.Model, etc. below!
         cursor.execute("""
-            SELECT CAP_Code, Derivative 
-            FROM dbo.Car_RVs 
-            WHERE Make = %s AND Model = %s AND Fuel = %s
+            SELECT c.CAP_Code, c.Derivative 
+            FROM dbo.Conduit c
+            WHERE c.Manufacturer = %s 
+              AND c.Model = %s 
+              AND c.Fuel = %s
+              AND (
+                  EXISTS (SELECT 1 FROM dbo.Car_RVs rv WHERE rv.CAP_Code = c.CAP_Code)
+                  OR 
+                  EXISTS (SELECT 1 FROM dbo.LCV_RVs lcv WHERE lcv.CAP_Code = c.CAP_Code)
+              )
         """, (make, model, fuel))
         
         results = cursor.fetchall()
