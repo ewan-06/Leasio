@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import pyodbc
-import os  # Added this to securely load passwords
+import pymssql
+import os
 
 app = FastAPI()
 
@@ -16,23 +16,19 @@ app.add_middleware(
 @app.get("/api/calculate")
 async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int):
     try:
-        # Securely pull the password from the server environment
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
         
-        conn = pyodbc.connect(
-            "DRIVER={ODBC Driver 17 for SQL Server};"
-            "SERVER=leasio-server.database.windows.net;"
-            "DATABASE=Leasio_database;" 
-            "UID=ewan_leasio;"
-            f"PWD={{{db_password}}};" # Safely injects the password with curly braces
-            "Encrypt=yes;"
-            "TrustServerCertificate=no;"
-            "Connection Timeout=30;"
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
         )
         
         cursor = conn.cursor()
-        cursor.execute("SELECT dbo.MonthlyRentalFunc(?, ?, ?, ?)", 
+        cursor.execute("SELECT dbo.MonthlyRentalFunc(%s, %d, %d, %d)", 
                        (cap_code, term, mileage, initial))
+        
         result = cursor.fetchone()
         
         if result and result[0] is not None:
