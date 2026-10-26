@@ -38,3 +38,33 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int
             
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/api/get_types")
+async def get_vehicle_types(make: str, model: str, fuel: str):
+    try:
+        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
+        )
+        
+        cursor = conn.cursor()
+        # Update "Derivative", "Make", "Model", "Fuel" to match your exact SQL column names
+        cursor.execute("""
+            SELECT CAP_Code, Derivative 
+            FROM dbo.Car_RVs 
+            WHERE Make = %s AND Model = %s AND Fuel = %s
+        """, (make, model, fuel))
+        
+        results = cursor.fetchall()
+        
+        types_list = []
+        for row in results:
+            types_list.append({"cap_code": row[0], "type_name": row[1]})
+            
+        return {"types": types_list}
+            
+    except Exception as e:
+        return {"error": str(e)}
