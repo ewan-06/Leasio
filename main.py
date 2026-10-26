@@ -77,3 +77,51 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
             
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/api/best_offers")
+async def get_best_offers():
+    try:
+        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
+        )
+        
+        cursor = conn.cursor()
+        
+        # This SQL groups by Make & Model, ranks by Monthly/OTR, and only takes the #1 from each group.
+        # NOTE: Check your BestOffers view in SSMS to ensure these exact column names exist!
+        cursor.execute("""
+            WITH RankedOffers AS (
+                SELECT 
+                    Make,
+                    Model,
+                    Derivative,
+                    [Monthly/OTR],
+                    MonthlyRental,
+                    ROW_NUMBER() OVER(PARTITION BY Make, Model ORDER BY [Monthly/OTR] ASC) as RankNum
+                FROM dbo.BestOffers
+            )
+            SELECT TOP 6 Make, Model, Derivative, MonthlyRental 
+            FROM RankedOffers
+            WHERE RankNum = 1
+            ORDER BY [Monthly/OTR] ASC;
+        """)
+        
+        results = cursor.fetchall()
+        
+        offers_list = []
+        for row in results:
+            offers_list.append({
+                "make": row[0],
+                "model": row[1],
+                "derivative": row[2],
+                "price": row[3]
+            })
+            
+        return {"offers": offers_list}
+            
+    except Exception as e:
+        return {"error": str(e)}
