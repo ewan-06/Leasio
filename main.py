@@ -131,3 +131,64 @@ async def get_best_offers():
             
     except Exception as e:
         return {"error": str(e)}
+
+# 3. THE FILTERABLE SEARCH ENDPOINT
+@app.get("/api/search_vehicles")
+async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", model: str = ""):
+    try:
+        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
+        )
+        
+        cursor = conn.cursor()
+        
+        # Query your main inventory table or view
+        sql = """
+            SELECT TOP 30 
+                c.Make, 
+                c.Model, 
+                c.CAP_Derivative, 
+                c.Fuel, 
+                c.CAP_Code,
+                b.Monthly
+            FROM dbo.Conduit c
+            LEFT JOIN dbo.BestOffers b ON c.CAP_Code = b.CAP_Code
+            WHERE 1=1
+        """
+        params = []
+        
+        if make and make != "Any make":
+            sql += " AND c.Make = %s"
+            params.append(make)
+            
+        if fuel and fuel != "Any fuel type":
+            sql += " AND c.Fuel = %s"
+            params.append(fuel)
+            
+        if model:
+            sql += " AND c.Model LIKE %s"
+            params.append(f"%{model}%")
+            
+        cursor.execute(sql, tuple(params))
+        results = cursor.fetchall()
+        
+        vehicles_list = []
+        for row in results:
+            vehicles_list.append({
+                "Make": row[0],
+                "Model": row[1],
+                "CAP_Derivative": row[2] if row[2] else "Standard Spec",
+                "Fuel": row[3] if row[3] else "Electric",
+                "CAP_Code": row[4],
+                "Monthly": row[5] if row[5] else "POA"
+            })
+            
+        conn.close()
+        return vehicles_list
+        
+    except Exception as e:
+        return {"error": str(e)}
