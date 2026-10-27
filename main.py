@@ -192,3 +192,31 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
         
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/api/get_models")
+async def get_models(make: str):
+    try:
+        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
+        )
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT Model 
+            FROM dbo.Conduit 
+            WHERE LOWER(Manufacturer) = LOWER(%s)
+            ORDER BY Model ASC
+        """, (make.strip(),))
+        
+        results = cursor.fetchall()
+        models_list = [row[0] for row in results if row[0]]
+        
+        conn.close()
+        return {"models": models_list}
+        
+    except Exception as e:
+        return {"error": str(e)}
