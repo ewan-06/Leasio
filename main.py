@@ -7,7 +7,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://www.leasio.co.uk"], 
+    allow_origins=["*"],  # Temporarily allows all origins so testing works anywhere
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
