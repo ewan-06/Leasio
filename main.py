@@ -261,6 +261,7 @@ async def get_fuels(make: str = "", model: str = ""):
         return {"error": str(e)}
 
 # 4. THE SINGLE VEHICLE LOOKUP ENDPOINT
+# 4. THE SINGLE VEHICLE LOOKUP ENDPOINT
 @app.get("/api/vehicle")
 async def get_vehicle(cap_code: str):
     try:
@@ -274,9 +275,9 @@ async def get_vehicle(cap_code: str):
         
         cursor = conn.cursor()
         
-        # Querying "Manufacturer" to match your Conduit schema
+        # Added the tech spec columns to the SELECT statement
         cursor.execute("""
-            SELECT Manufacturer, Model, CAP_Derivative, Fuel 
+            SELECT Manufacturer, Model, CAP_Derivative, Fuel, Eng_size, KW, BHP_code
             FROM dbo.Conduit 
             WHERE CAP_Code = %s
         """, (cap_code.strip(),))
@@ -285,12 +286,15 @@ async def get_vehicle(cap_code: str):
         conn.close()
         
         if row:
-            # Capitalized keys so your vehicles.html JavaScript can parse them perfectly
+            # We safely format the tech specs here before sending them to the frontend
             return {
                 "Make": row[0], 
                 "Model": row[1], 
                 "CAP_Derivative": row[2] if row[2] else "Standard Spec", 
-                "Fuel": row[3] if row[3] else "Electric"
+                "Fuel": row[3] if row[3] else "Electric",
+                "EngineSize": f"{row[4]} cc" if row[4] else "N/A",
+                "PowerKW": f"{row[5]} kW" if row[5] else "N/A",
+                "BHP": str(row[6]) if row[6] else "N/A"
             }
         else:
             return {"error": "Vehicle not found"}
