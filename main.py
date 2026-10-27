@@ -259,3 +259,41 @@ async def get_fuels(make: str = "", model: str = ""):
         
     except Exception as e:
         return {"error": str(e)}
+
+# 4. THE SINGLE VEHICLE LOOKUP ENDPOINT
+@app.get("/api/vehicle")
+async def get_vehicle(cap_code: str):
+    try:
+        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
+        )
+        
+        cursor = conn.cursor()
+        
+        # Querying "Manufacturer" to match your Conduit schema
+        cursor.execute("""
+            SELECT Manufacturer, Model, CAP_Derivative, Fuel 
+            FROM dbo.Conduit 
+            WHERE CAP_Code = %s
+        """, (cap_code.strip(),))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            # Capitalized keys so your vehicles.html JavaScript can parse them perfectly
+            return {
+                "Make": row[0], 
+                "Model": row[1], 
+                "CAP_Derivative": row[2] if row[2] else "Standard Spec", 
+                "Fuel": row[3] if row[3] else "Electric"
+            }
+        else:
+            return {"error": "Vehicle not found"}
+            
+    except Exception as e:
+        return {"error": str(e)}
