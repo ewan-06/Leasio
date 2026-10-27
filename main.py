@@ -146,10 +146,10 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
         
         cursor = conn.cursor()
         
-        # Query your main inventory table or view
+        # Fixed: Using c.Manufacturer to match your database column schema
         sql = """
             SELECT TOP 30 
-                c.Make, 
+                c.Manufacturer, 
                 c.Model, 
                 c.CAP_Derivative, 
                 c.Fuel, 
@@ -162,16 +162,16 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
         params = []
         
         if make and make != "Any make":
-            sql += " AND c.Make = %s"
-            params.append(make)
+            sql += " AND LOWER(c.Manufacturer) = LOWER(%s)"
+            params.append(make.strip())
             
         if fuel and fuel != "Any fuel type":
-            sql += " AND c.Fuel = %s"
-            params.append(fuel)
+            sql += " AND LOWER(c.Fuel) = LOWER(%s)"
+            params.append(fuel.strip())
             
         if model:
-            sql += " AND c.Model LIKE %s"
-            params.append(f"%{model}%")
+            sql += " AND LOWER(c.Model) LIKE LOWER(%s)"
+            params.append(f"%{model.strip()}%")
             
         cursor.execute(sql, tuple(params))
         results = cursor.fetchall()
