@@ -220,3 +220,42 @@ async def get_models(make: str):
         
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/api/get_fuels")
+async def get_fuels(make: str = "", model: str = ""):
+    try:
+        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
+        )
+        
+        cursor = conn.cursor()
+        
+        # Start with a base query to find unique fuel types
+        sql = "SELECT DISTINCT Fuel FROM dbo.Conduit WHERE Fuel IS NOT NULL AND Fuel != ''"
+        params = []
+        
+        if make and make != "Any make":
+            sql += " AND LOWER(Manufacturer) = LOWER(%s)"
+            params.append(make.strip())
+            
+        if model:
+            sql += " AND LOWER(Model) = LOWER(%s)"
+            params.append(model.strip())
+            
+        sql += " ORDER BY Fuel ASC"
+        
+        cursor.execute(sql, tuple(params))
+        results = cursor.fetchall()
+        
+        # Extract the fuel types into a clean list
+        fuels_list = [row[0] for row in results if row[0]]
+        
+        conn.close()
+        return {"fuels": fuels_list}
+        
+    except Exception as e:
+        return {"error": str(e)}
