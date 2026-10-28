@@ -312,3 +312,33 @@ async def get_vehicle(cap_code: str):
             
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/api/get_makes")
+async def get_makes(vehicle_type: str = "car"):
+    try:
+        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="ewan_leasio",
+            password=db_password,
+            database="Leasio_database"
+        )
+        cursor = conn.cursor()
+        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
+
+        cursor.execute(f"""
+            SELECT DISTINCT c.Manufacturer 
+            FROM dbo.Conduit c
+            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
+            WHERE c.Manufacturer IS NOT NULL AND c.Manufacturer != ''
+            ORDER BY c.Manufacturer ASC
+        """)
+        
+        results = cursor.fetchall()
+        makes_list = [row[0] for row in results if row[0]]
+        
+        conn.close()
+        return {"makes": makes_list}
+        
+    except Exception as e:
+        return {"error": str(e)}
