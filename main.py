@@ -132,9 +132,9 @@ async def get_best_offers():
     except Exception as e:
         return {"error": str(e)}
 
-# 3. THE FILTERABLE SEARCH ENDPOINT
+# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Vehicle Type support)
 @app.get("/api/search_vehicles")
-async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", model: str = ""):
+async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", model: str = "", vehicle_type: str = "car"):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
         conn = pymssql.connect(
@@ -143,11 +143,12 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
             password=db_password,
             database="Leasio_database"
         )
-        
         cursor = conn.cursor()
         
-        # Fixed: Using c.Manufacturer to match your database column schema
-        sql = """
+        # Choose the correct RV table based on vehicle type
+        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
+
+        sql = f"""
             SELECT TOP 30 
                 c.Manufacturer, 
                 c.Model, 
@@ -156,6 +157,7 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
                 c.CAP_Code,
                 b.Monthly
             FROM dbo.Conduit c
+            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
             LEFT JOIN dbo.BestOffers b ON c.CAP_Code = b.CAP_Code
             WHERE 1=1
         """
@@ -193,8 +195,9 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
     except Exception as e:
         return {"error": str(e)}
 
+
 @app.get("/api/get_models")
-async def get_models(make: str):
+async def get_models(make: str, vehicle_type: str = "car"):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
         conn = pymssql.connect(
@@ -205,11 +208,14 @@ async def get_models(make: str):
         )
         
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT DISTINCT Model 
-            FROM dbo.Conduit 
-            WHERE LOWER(Manufacturer) = LOWER(%s)
-            ORDER BY Model ASC
+        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
+
+        cursor.execute(f"""
+            SELECT DISTINCT c.Model 
+            FROM dbo.Conduit c
+            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
+            WHERE LOWER(c.Manufacturer) = LOWER(%s)
+            ORDER BY c.Model ASC
         """, (make.strip(),))
         
         results = cursor.fetchall()
@@ -221,8 +227,9 @@ async def get_models(make: str):
     except Exception as e:
         return {"error": str(e)}
 
+
 @app.get("/api/get_fuels")
-async def get_fuels(make: str = "", model: str = ""):
+async def get_fuels(make: str = "", model: str = "", vehicle_type: str = "car"):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
         conn = pymssql.connect(
@@ -233,25 +240,29 @@ async def get_fuels(make: str = "", model: str = ""):
         )
         
         cursor = conn.cursor()
-        
-        # Start with a base query to find unique fuel types
-        sql = "SELECT DISTINCT Fuel FROM dbo.Conduit WHERE Fuel IS NOT NULL AND Fuel != ''"
+        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
+
+        sql = f"""
+            SELECT DISTINCT c.Fuel 
+            FROM dbo.Conduit c
+            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
+            WHERE c.Fuel IS NOT NULL AND c.Fuel != ''
+        """
         params = []
         
         if make and make != "Any make":
-            sql += " AND LOWER(Manufacturer) = LOWER(%s)"
+            sql += " AND LOWER(c.Manufacturer) = LOWER(%s)"
             params.append(make.strip())
             
         if model:
-            sql += " AND LOWER(Model) = LOWER(%s)"
+            sql += " AND LOWER(c.Model) = LOWER(%s)"
             params.append(model.strip())
             
-        sql += " ORDER BY Fuel ASC"
+        sql += " ORDER BY c.Fuel ASC"
         
         cursor.execute(sql, tuple(params))
         results = cursor.fetchall()
         
-        # Extract the fuel types into a clean list
         fuels_list = [row[0] for row in results if row[0]]
         
         conn.close()
