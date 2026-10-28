@@ -132,9 +132,15 @@ async def get_best_offers():
     except Exception as e:
         return {"error": str(e)}
 
-# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Vehicle Type support)
+# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Sorting support)
 @app.get("/api/search_vehicles")
-async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", model: str = "", vehicle_type: str = "car"):
+async def search_vehicles(
+    make: str = "Any make", 
+    fuel: str = "Any fuel type", 
+    model: str = "", 
+    vehicle_type: str = "car",
+    sort: str = ""
+):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
         conn = pymssql.connect(
@@ -148,8 +154,16 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
         # Choose the correct RV table based on vehicle type
         rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
 
+        # Dynamically set SQL order clause based on sorting parameter
+        if sort == "price_asc":
+            order_clause = "ORDER BY TRY_CAST(b.Monthly AS FLOAT) ASC"
+        elif sort == "price_desc":
+            order_clause = "ORDER BY TRY_CAST(b.Monthly AS FLOAT) DESC"
+        else:
+            order_clause = "ORDER BY c.Manufacturer ASC, c.Model ASC"
+
         sql = f"""
-            SELECT TOP 30 
+            SELECT 
                 c.Manufacturer, 
                 c.Model, 
                 c.CAP_Derivative, 
@@ -174,6 +188,8 @@ async def search_vehicles(make: str = "Any make", fuel: str = "Any fuel type", m
         if model:
             sql += " AND LOWER(c.Model) LIKE LOWER(%s)"
             params.append(f"%{model.strip()}%")
+
+        sql += f" {order_clause}"
             
         cursor.execute(sql, tuple(params))
         results = cursor.fetchall()
