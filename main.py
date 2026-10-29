@@ -79,7 +79,7 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
         return {"error": str(e)}
 
 @app.get("/api/best_offers")
-async def get_best_offers():
+async def get_best_offers(vehicle_type: str = "car", limit: int = 9):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
         conn = pymssql.connect(
@@ -88,47 +88,61 @@ async def get_best_offers():
             password=db_password,
             database="Leasio_database"
         )
-        
         cursor = conn.cursor()
         
-        # 1. Groups by Make/Model and ranks by Monthly/OTR
-        # 2. Joins to Conduit to grab the Derivative (trim name)
-        # NOTE: If your Conduit trim column is called Description, change c.Derivative to c.Description!
-        cursor.execute("""
+        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
+
+        # Deduplicate by Make + Model, picking the lowest [Monthly/OTR] per model
+        sql = f"""
             WITH RankedOffers AS (
                 SELECT 
-                    CAP_Code,
-                    Make,
-                    Model,
-                    Monthly,
-                    [Monthly/OTR],
-                    ROW_NUMBER() OVER(PARTITION BY Make, Model ORDER BY [Monthly/OTR] ASC) as RankNum
-                FROM dbo.BestOffers
+                    c.Manufacturer, 
+                    c.Model, 
+                    c.CAP_Derivative, 
+                    c.Fuel, 
+                    c.CAP_Code,
+                    b.Monthly,
+                    TRY_CAST(b.[Monthly/OTR] AS FLOAT) AS Score,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY c.Manufacturer, c.Model 
+                        ORDER BY TRY_CAST(b.[Monthly/OTR] AS FLOAT) ASC, TRY_CAST(b.Monthly AS FLOAT) ASC
+                    ) AS rn
+                FROM dbo.BestOffers b
+                INNER JOIN dbo.Conduit c ON b.CAP_Code = c.CAP_Code
+                INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
+                WHERE b.Monthly IS NOT NULL 
+                  AND b.[Monthly/OTR] IS NOT NULL
+                  AND TRY_CAST(b.[Monthly/OTR] AS FLOAT) > 0
             )
-            SELECT TOP 6 
-                r.Make, 
-                r.Model, 
-                c.CAP_Derivative, 
-                r.Monthly 
-            FROM RankedOffers r
-            LEFT JOIN dbo.Conduit c ON r.CAP_Code = c.CAP_Code
-            WHERE r.RankNum = 1
-            ORDER BY r.[Monthly/OTR] ASC;
-        """)
+            SELECT TOP (%s)
+                Manufacturer,
+                Model,
+                CAP_Derivative,
+                Fuel,
+                CAP_Code,
+                Monthly
+            FROM RankedOffers
+            WHERE rn = 1
+            ORDER BY Score ASC
+        """
         
+        cursor.execute(sql, (limit,))
         results = cursor.fetchall()
         
-        offers_list = []
+        offers = []
         for row in results:
-            offers_list.append({
-                "make": row[0],
-                "model": row[1],
-                "derivative": row[2] if row[2] else "Standard Spec", # Fallback if trim is blank
-                "price": row[3]
+            offers.append({
+                "Make": row[0],
+                "Model": row[1],
+                "CAP_Derivative": row[2] if row[2] else "Standard Spec",
+                "Fuel": row[3] if row[3] else "Electric",
+                "CAP_Code": row[4],
+                "Monthly": round(float(row[5]), 2) if row[5] else "POA"
             })
             
-        return {"offers": offers_list}
-            
+        conn.close()
+        return offers
+        
     except Exception as e:
         return {"error": str(e)}
 
