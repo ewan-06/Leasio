@@ -146,14 +146,15 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9):
     except Exception as e:
         return {"error": str(e)}
 
-# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Sorting support)
+# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Max Price & Sorting)
 @app.get("/api/search_vehicles")
 async def search_vehicles(
     make: str = "Any make", 
     fuel: str = "Any fuel type", 
     model: str = "", 
     vehicle_type: str = "car",
-    sort: str = ""
+    sort: str = "",
+    max_price: float = 0
 ):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
@@ -165,12 +166,10 @@ async def search_vehicles(
         )
         cursor = conn.cursor()
         
-        # Choose the correct RV table based on vehicle type
         rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
 
-        # Dynamically set SQL order clause based on sorting parameter
         if sort == "price_asc":
-            order_clause = "ORDER BY TRY_CAST(b.Monthly AS FLOAT) ASC"
+            order_clause = "ORDER BY CASE WHEN TRY_CAST(b.Monthly AS FLOAT) IS NULL THEN 1 ELSE 0 END, TRY_CAST(b.Monthly AS FLOAT) ASC"
         elif sort == "price_desc":
             order_clause = "ORDER BY TRY_CAST(b.Monthly AS FLOAT) DESC"
         else:
@@ -203,6 +202,11 @@ async def search_vehicles(
             sql += " AND LOWER(c.Model) LIKE LOWER(%s)"
             params.append(f"%{model.strip()}%")
 
+        # Filter by max monthly price if set below the 2000 ceiling
+        if max_price and max_price > 0 and max_price < 2000:
+            sql += " AND TRY_CAST(b.Monthly AS FLOAT) IS NOT NULL AND TRY_CAST(b.Monthly AS FLOAT) <= %s"
+            params.append(float(max_price))
+
         sql += f" {order_clause}"
             
         cursor.execute(sql, tuple(params))
@@ -216,7 +220,7 @@ async def search_vehicles(
                 "CAP_Derivative": row[2] if row[2] else "Standard Spec",
                 "Fuel": row[3] if row[3] else "Electric",
                 "CAP_Code": row[4],
-                "Monthly": row[5] if row[5] else "POA"
+                "Monthly": round(float(row[5]), 2) if row[5] else "POA"
             })
             
         conn.close()
