@@ -173,12 +173,14 @@ async def search_vehicles(
         
         rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
 
+       # Configure sorting based on user selection
         if sort == "price_asc":
             order_clause = "ORDER BY CASE WHEN TRY_CAST(b.Monthly AS FLOAT) IS NULL THEN 1 ELSE 0 END, TRY_CAST(b.Monthly AS FLOAT) ASC"
         elif sort == "price_desc":
             order_clause = "ORDER BY TRY_CAST(b.Monthly AS FLOAT) DESC"
         else:
-            order_clause = "ORDER BY c.Manufacturer ASC, c.Model ASC"
+            # DEFAULT / RELEVANCE: Sort by Best Value ([Monthly/OTR] scale)
+            order_clause = "ORDER BY CASE WHEN TRY_CAST(b.[Monthly/OTR] AS FLOAT) IS NULL OR TRY_CAST(b.[Monthly/OTR] AS FLOAT) <= 0 THEN 1 ELSE 0 END, TRY_CAST(b.[Monthly/OTR] AS FLOAT) ASC"
 
         sql = f"""
             SELECT 
