@@ -79,7 +79,7 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
         return {"error": str(e)}
 
 @app.get("/api/best_offers")
-async def get_best_offers(vehicle_type: str = "car", limit: int = 9):
+async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly: float = 0):
     try:
         db_password = os.getenv("AZURE_SQL_PASSWORD", "")
         conn = pymssql.connect(
@@ -92,7 +92,11 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9):
         
         rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
 
-        # Deduplicate by Make + Model, picking the lowest [Monthly/OTR] per model
+        # Apply default smart price caps if none are explicitly requested:
+        # Cars default to £400 max, Vans default to £800 max
+        if max_monthly <= 0:
+            max_monthly = 800.0 if vehicle_type.lower() == "vans" else 400.0
+
         sql = f"""
             WITH RankedOffers AS (
                 SELECT 
@@ -113,6 +117,7 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9):
                 WHERE b.Monthly IS NOT NULL 
                   AND b.[Monthly/OTR] IS NOT NULL
                   AND TRY_CAST(b.[Monthly/OTR] AS FLOAT) > 0
+                  AND TRY_CAST(b.Monthly AS FLOAT) <= %s
             )
             SELECT TOP (%s)
                 Manufacturer,
@@ -126,7 +131,7 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9):
             ORDER BY Score ASC
         """
         
-        cursor.execute(sql, (limit,))
+        cursor.execute(sql, (max_monthly, limit))
         results = cursor.fetchall()
         
         offers = []
