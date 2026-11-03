@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr
+from sqlalchemy import text
 import pymssql 
 import os
+import bcrypt
 
 app = FastAPI()
 
@@ -383,3 +386,57 @@ async def get_makes(vehicle_type: str = "car"):
         
     except Exception as e:
         return {"error": str(e)}
+
+# Define the expected JSON payload from the frontend
+class RegisterRequest(BaseModel):
+    first_name: str
+    last_name: str
+    date_of_birth: date
+    email: EmailStr
+    phone: str
+    address: str
+    password: str
+
+@app.post("/api/register")
+def register_customer(request: RegisterRequest):
+    # Hash the password securely
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(request.password.encode('utf-8'), salt).decode('utf-8')
+    
+    try:
+        with engine.begin() as conn:
+            # Parameterized query with CAST to VARBINARY for encrypted columns
+            conn.execute(text("""
+                INSERT INTO dbo.Customers (
+                    FirstName, 
+                    LastName, 
+                    DateOfBirth, 
+                    EmailEncrypted, 
+                    PhoneEncrypted, 
+                    AddressEncrypted, 
+                    PasswordHash
+                )
+                VALUES (
+                    :first_name, 
+                    :last_name, 
+                    :dob, 
+                    CAST(:email AS VARBINARY(MAX)), 
+                    CAST(:phone AS VARBINARY(MAX)), 
+                    CAST(:address AS VARBINARY(MAX)), 
+                    :pass_hash
+                )
+            """), {
+                "first_name": request.first_name,
+                "last_name": request.last_name,
+                "dob": request.date_of_birth,
+                "email": request.email,
+                "phone": request.phone,
+                "address": request.address,
+                "pass_hash": hashed_password
+            })
+            
+        return {"success": True, "message": "Account securely created."}
+        
+    except Exception as e:
+        print(f"Database error: {e}")
+        raise HTTPException(status_code=400, detail="Registration failed. Please try again.")
