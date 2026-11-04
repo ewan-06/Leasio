@@ -404,9 +404,6 @@ class RegisterRequest(BaseModel):
 
 @app.post("/api/register")
 def register_customer(request: RegisterRequest):
-    salt = bcrypt.gensalt()
-    hashed_password = bcrypt.hashpw(request.password.encode('utf-8'), salt).decode('utf-8')
-    
     try:
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
@@ -416,6 +413,27 @@ def register_customer(request: RegisterRequest):
             database="Leasio_database"
         )
         cursor = conn.cursor()
+        
+        # 1. Check if email or phone number already exists
+        # Note: Since EmailEncrypted and PhoneEncrypted are stored via CAST(... AS VARBINARY(MAX)), 
+        # we check against them by casting the incoming string or checking matching text representations.
+        cursor.execute("""
+            SELECT 1 FROM dbo.Customers 
+            WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
+               OR PhoneEncrypted = CAST(%s AS VARBINARY(MAX))
+        """, (request.email.strip(), request.phone.strip()))
+        
+        existing_user = cursor.fetchone()
+        if existing_user:
+            conn.close()
+            raise HTTPException(
+                status_code=400, 
+                detail="An account with this email address or phone number already exists."
+            )
+        
+        # 2. Hash password & proceed with insertion if unique
+        salt = bcrypt.gensalt()
+        hashed_password = bcrypt.hashpw(request.password.encode('utf-8'), salt).decode('utf-8')
         
         cursor.execute("""
             INSERT INTO dbo.Customers (
@@ -433,8 +451,8 @@ def register_customer(request: RegisterRequest):
             request.first_name,
             request.last_name,
             str(request.date_of_birth),
-            request.email,
-            request.phone,
+            request.email.strip(),
+            request.phone.strip(),
             request.address,
             hashed_password
         ))
@@ -443,6 +461,8 @@ def register_customer(request: RegisterRequest):
         conn.close()
         return {"success": True, "message": "Account securely created."}
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Database error: {e}")
         raise HTTPException(status_code=400, detail=f"Registration failed: {str(e)}")
