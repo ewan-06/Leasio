@@ -446,3 +446,61 @@ def register_customer(request: RegisterRequest):
     except Exception as e:
         print(f"Database error: {e}")
         raise HTTPException(status_code=400, detail=f"Registration failed: {str(e)}")
+
+# Define the expected JSON payload for Login
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/login")
+def login_customer(request: LoginRequest):
+    try:
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="leasio_user@leasio-server",
+            password=db_password,
+            database="Leasio_database"
+        )
+        cursor = conn.cursor()
+        
+        # Look up the customer by matching the VARBINARY(MAX) cast used in /api/register
+        cursor.execute("""
+            SELECT FirstName, LastName, PasswordHash 
+            FROM dbo.Customers 
+            WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
+        """, (request.email.strip(),))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+            
+        first_name, last_name, stored_hash = row[0], row[1], row[2]
+        
+        # Ensure stored_hash is a string before encoding for bcrypt verification
+        if isinstance(stored_hash, bytes):
+            stored_hash_bytes = stored_hash
+        else:
+            stored_hash_bytes = str(stored_hash).encode('utf-8')
+            
+        # Verify the password with bcrypt
+        if not bcrypt.checkpw(request.password.encode('utf-8'), stored_hash_bytes):
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+            
+        return {
+            "success": True,
+            "message": "Login successful.",
+            "user": {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": request.email.strip()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred during login.")
