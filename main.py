@@ -408,8 +408,13 @@ def register_customer(request: RegisterRequest):
     hashed_password = bcrypt.hashpw(request.password.encode('utf-8'), salt).decode('utf-8')
     
     try:
-        # Use your existing pymssql connection variables here
-        conn = pymssql.connect(server=server, user=user, password=password, database=database)
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="leasio_user",
+            password=db_password,
+            database="Leasio_database"
+        )
         cursor = conn.cursor()
         
         cursor.execute("""
