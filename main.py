@@ -10,8 +10,13 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Temporarily allows all origins so testing works anywhere
-    allow_credentials=True,
+    allow_origins=[
+        "https://www.leasio.co.uk",
+        "https://leasio.co.uk",
+        "http://localhost:5500",
+        "*"
+    ],
+    allow_credentials=False, # Set to False when using "*" or if not sending cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -399,44 +404,40 @@ class RegisterRequest(BaseModel):
 
 @app.post("/api/register")
 def register_customer(request: RegisterRequest):
-    # Hash the password securely
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(request.password.encode('utf-8'), salt).decode('utf-8')
     
     try:
-        with engine.begin() as conn:
-            # Parameterized query with CAST to VARBINARY for encrypted columns
-            conn.execute(text("""
-                INSERT INTO dbo.Customers (
-                    FirstName, 
-                    LastName, 
-                    DateOfBirth, 
-                    EmailEncrypted, 
-                    PhoneEncrypted, 
-                    AddressEncrypted, 
-                    PasswordHash
-                )
-                VALUES (
-                    :first_name, 
-                    :last_name, 
-                    :dob, 
-                    CAST(:email AS VARBINARY(MAX)), 
-                    CAST(:phone AS VARBINARY(MAX)), 
-                    CAST(:address AS VARBINARY(MAX)), 
-                    :pass_hash
-                )
-            """), {
-                "first_name": request.first_name,
-                "last_name": request.last_name,
-                "dob": request.date_of_birth,
-                "email": request.email,
-                "phone": request.phone,
-                "address": request.address,
-                "pass_hash": hashed_password
-            })
-            
+        # Use your existing pymssql connection variables here
+        conn = pymssql.connect(server=server, user=user, password=password, database=database)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO dbo.Customers (
+                FirstName, LastName, DateOfBirth, 
+                EmailEncrypted, PhoneEncrypted, AddressEncrypted, PasswordHash
+            )
+            VALUES (
+                %s, %s, %s, 
+                CAST(%s AS VARBINARY(MAX)), 
+                CAST(%s AS VARBINARY(MAX)), 
+                CAST(%s AS VARBINARY(MAX)), 
+                %s
+            )
+        """, (
+            request.first_name,
+            request.last_name,
+            str(request.date_of_birth),
+            request.email,
+            request.phone,
+            request.address,
+            hashed_password
+        ))
+        
+        conn.commit()
+        conn.close()
         return {"success": True, "message": "Account securely created."}
         
     except Exception as e:
         print(f"Database error: {e}")
-        raise HTTPException(status_code=400, detail="Registration failed. Please try again.")
+        raise HTTPException(status_code=400, detail=f"Registration failed: {str(e)}")
