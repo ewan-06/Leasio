@@ -1,3 +1,5 @@
 fastapi
 uvicorn
 pymssql
+bcrypt
+pydantic[email]
