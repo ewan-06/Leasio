@@ -25,10 +25,10 @@ app.add_middleware(
 @app.get("/api/calculate")
 async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
@@ -50,10 +50,10 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int
 @app.get("/api/get_types")
 async def get_vehicle_types(make: str, model: str, fuel: str):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
@@ -89,10 +89,10 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
 @app.get("/api/best_offers")
 async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly: float = 0):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
@@ -170,10 +170,10 @@ async def search_vehicles(
     max_price: float = 0
 ):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
@@ -248,10 +248,10 @@ async def search_vehicles(
 @app.get("/api/get_models")
 async def get_models(make: str, vehicle_type: str = "car"):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
@@ -280,10 +280,10 @@ async def get_models(make: str, vehicle_type: str = "car"):
 @app.get("/api/get_fuels")
 async def get_fuels(make: str = "", model: str = "", vehicle_type: str = "car"):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
@@ -325,10 +325,10 @@ async def get_fuels(make: str = "", model: str = "", vehicle_type: str = "car"):
 @app.get("/api/vehicle")
 async def get_vehicle(cap_code: str):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
@@ -365,10 +365,10 @@ async def get_vehicle(cap_code: str):
 @app.get("/api/get_makes")
 async def get_makes(vehicle_type: str = "car"):
     try:
-        db_password = os.getenv("AZURE_SQL_PASSWORD", "")
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="ewan_leasio",
+            user="leasio_user",
             password=db_password,
             database="Leasio_database"
         )
