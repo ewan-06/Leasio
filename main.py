@@ -28,7 +28,7 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -53,7 +53,7 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -92,7 +92,7 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -173,7 +173,7 @@ async def search_vehicles(
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -251,7 +251,7 @@ async def get_models(make: str, vehicle_type: str = "car"):
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -283,7 +283,7 @@ async def get_fuels(make: str = "", model: str = "", vehicle_type: str = "car"):
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -328,7 +328,7 @@ async def get_vehicle(cap_code: str):
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -368,7 +368,7 @@ async def get_makes(vehicle_type: str = "car"):
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
@@ -411,7 +411,7 @@ def register_customer(request: RegisterRequest):
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
             server="leasio-server.database.windows.net",
-            user="leasio_user",
+            user="leasio_user@leasio-server",
             password=db_password,
             database="Leasio_database"
         )
