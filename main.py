@@ -396,8 +396,8 @@ async def get_makes(vehicle_type: str = "car"):
 class RegisterRequest(BaseModel):
     first_name: str
     last_name: str
-    date_of_birth: date
-    email: EmailStr
+    date_of_birth: str
+    email: str
     phone: str
     address: str
     password: str
