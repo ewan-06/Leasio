@@ -3,3 +3,4 @@ uvicorn
 pymssql
 bcrypt
 pydantic[email]
+sqlalchemy
