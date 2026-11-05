@@ -159,7 +159,7 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly
     except Exception as e:
         return {"error": str(e)}
 
-# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Max Price & Sorting)
+# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Max Price, Sorting, Size & Body Type)
 @app.get("/api/search_vehicles")
 async def search_vehicles(
     make: str = "Any make", 
@@ -167,7 +167,9 @@ async def search_vehicles(
     model: str = "", 
     vehicle_type: str = "car",
     sort: str = "",
-    max_price: float = 0
+    max_price: float = 0,
+    size: str = "",        # NEW: Accepts size parameter
+    bodytype: str = ""     # NEW: Accepts bodytype parameter
 ):
     try:
         db_password = os.getenv("SQL_USER_PASSWORD", "")
@@ -181,7 +183,7 @@ async def search_vehicles(
         
         rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
 
-       # Configure sorting based on user selection
+        # Configure sorting based on user selection
         if sort == "price_asc":
             order_clause = "ORDER BY CASE WHEN TRY_CAST(b.Monthly AS FLOAT) IS NULL THEN 1 ELSE 0 END, TRY_CAST(b.Monthly AS FLOAT) ASC"
         elif sort == "price_desc":
@@ -190,6 +192,7 @@ async def search_vehicles(
             # DEFAULT / RELEVANCE: Sort by Best Value ([Monthly/OTR] scale)
             order_clause = "ORDER BY CASE WHEN TRY_CAST(b.[Monthly/OTR] AS FLOAT) IS NULL OR TRY_CAST(b.[Monthly/OTR] AS FLOAT) <= 0 THEN 1 ELSE 0 END, TRY_CAST(b.[Monthly/OTR] AS FLOAT) ASC"
 
+        # NEW: Added LEFT JOIN for dbo.vehicle_types (vt)
         sql = f"""
             SELECT 
                 c.Manufacturer, 
@@ -201,6 +204,10 @@ async def search_vehicles(
             FROM dbo.Conduit c
             INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
             LEFT JOIN dbo.BestOffers b ON c.CAP_Code = b.CAP_Code
+            LEFT JOIN dbo.vehicle_types vt 
+                ON c.Manufacturer = vt.Make 
+                AND c.Model = vt.Model 
+                AND c.CAP_Derivative = vt.Derivative
             WHERE 1=1
         """
         params = []
@@ -222,6 +229,16 @@ async def search_vehicles(
             sql += " AND TRY_CAST(b.Monthly AS FLOAT) IS NOT NULL AND TRY_CAST(b.Monthly AS FLOAT) <= %s"
             params.append(float(max_price))
 
+        # NEW: Filter by Size
+        if size:
+            sql += " AND LOWER(vt.size) = LOWER(%s)"
+            params.append(size.strip())
+
+        # NEW: Filter by Body Type
+        if bodytype:
+            sql += " AND LOWER(vt.bodytype) = LOWER(%s)"
+            params.append(bodytype.strip())
+
         sql += f" {order_clause}"
             
         cursor.execute(sql, tuple(params))
@@ -230,7 +247,7 @@ async def search_vehicles(
         vehicles_list = []
         for row in results:
             vehicles_list.append({
-                "Make": row[0],
+                "Manufacturer": row[0],
                 "Model": row[1],
                 "CAP_Derivative": row[2] if row[2] else "Standard Spec",
                 "Fuel": row[3] if row[3] else "Electric",
