@@ -247,7 +247,7 @@ async def search_vehicles(
         vehicles_list = []
         for row in results:
             vehicles_list.append({
-                "Manufacturer": row[0],
+                "Make": row[0],
                 "Model": row[1],
                 "CAP_Derivative": row[2] if row[2] else "Standard Spec",
                 "Fuel": row[3] if row[3] else "Electric",
