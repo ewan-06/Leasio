@@ -159,7 +159,7 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly
     except Exception as e:
         return {"error": str(e)}
 
-# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Max Price, Sorting, Size & Body Type)
+# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Server-Side Pagination)
 @app.get("/api/search_vehicles")
 async def search_vehicles(
     make: str = "Any make", 
@@ -168,9 +168,12 @@ async def search_vehicles(
     vehicle_type: str = "car",
     sort: str = "",
     max_price: float = 0,
-    size: str = "",        # NEW: Accepts size parameter
-    bodytype: str = ""     # NEW: Accepts bodytype parameter
+    size: str = "",
+    bodytype: str = "",
+    page: int = 1,      # <-- New parameter
+    limit: int = 24     # <-- New parameter
 ):
+    offset = (page - 1) * limit
     try:
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
@@ -189,18 +192,11 @@ async def search_vehicles(
         elif sort == "price_desc":
             order_clause = "ORDER BY TRY_CAST(b.Monthly AS FLOAT) DESC"
         else:
-            # DEFAULT / RELEVANCE: Sort by Best Value ([Monthly/OTR] scale)
+            # DEFAULT / RELEVANCE: Sort by Best Value
             order_clause = "ORDER BY CASE WHEN TRY_CAST(b.[Monthly/OTR] AS FLOAT) IS NULL OR TRY_CAST(b.[Monthly/OTR] AS FLOAT) <= 0 THEN 1 ELSE 0 END, TRY_CAST(b.[Monthly/OTR] AS FLOAT) ASC"
 
-        # NEW: Added LEFT JOIN for dbo.vehicle_types (vt)
-        sql = f"""
-            SELECT 
-                c.Manufacturer, 
-                c.Model, 
-                c.CAP_Derivative, 
-                c.Fuel, 
-                c.CAP_Code,
-                b.Monthly
+        # 1. Build the base FROM and WHERE clauses to share between COUNT and SELECT
+        base_sql = f"""
             FROM dbo.Conduit c
             INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
             LEFT JOIN dbo.BestOffers b ON c.CAP_Code = b.CAP_Code
@@ -210,38 +206,59 @@ async def search_vehicles(
                 AND c.CAP_Derivative = vt.Derivative
             WHERE 1=1
         """
+        
+        where_clauses = ""
         params = []
         
         if make and make != "Any make":
-            sql += " AND LOWER(c.Manufacturer) = LOWER(%s)"
+            where_clauses += " AND LOWER(c.Manufacturer) = LOWER(%s)"
             params.append(make.strip())
             
         if fuel and fuel != "Any fuel type":
-            sql += " AND LOWER(c.Fuel) = LOWER(%s)"
+            where_clauses += " AND LOWER(c.Fuel) = LOWER(%s)"
             params.append(fuel.strip())
             
         if model:
-            sql += " AND LOWER(c.Model) LIKE LOWER(%s)"
+            where_clauses += " AND LOWER(c.Model) LIKE LOWER(%s)"
             params.append(f"%{model.strip()}%")
 
-        # Filter by max monthly price if set below the 2000 ceiling
         if max_price and max_price > 0 and max_price < 2000:
-            sql += " AND TRY_CAST(b.Monthly AS FLOAT) IS NOT NULL AND TRY_CAST(b.Monthly AS FLOAT) <= %s"
+            where_clauses += " AND TRY_CAST(b.Monthly AS FLOAT) IS NOT NULL AND TRY_CAST(b.Monthly AS FLOAT) <= %s"
             params.append(float(max_price))
 
-        # NEW: Filter by Size
         if size:
-            sql += " AND LOWER(vt.size) = LOWER(%s)"
+            where_clauses += " AND LOWER(vt.size) = LOWER(%s)"
             params.append(size.strip())
 
-        # NEW: Filter by Body Type
         if bodytype:
-            sql += " AND LOWER(vt.bodytype) = LOWER(%s)"
+            where_clauses += " AND LOWER(vt.bodytype) = LOWER(%s)"
             params.append(bodytype.strip())
 
-        sql += f" {order_clause}"
-            
-        cursor.execute(sql, tuple(params))
+        # 2. Get the Total Count of matching vehicles
+        count_sql = f"SELECT COUNT(*) {base_sql} {where_clauses}"
+        cursor.execute(count_sql, tuple(params))
+        total_count = cursor.fetchone()[0]
+
+        # 3. Fetch only the specific page of vehicles
+        main_sql = f"""
+            SELECT 
+                c.Manufacturer, 
+                c.Model, 
+                c.CAP_Derivative, 
+                c.Fuel, 
+                c.CAP_Code,
+                b.Monthly
+            {base_sql} 
+            {where_clauses}
+            {order_clause}
+            OFFSET %d ROWS
+            FETCH NEXT %d ROWS ONLY
+        """
+        
+        # Add offset and limit to the end of the parameters array
+        main_params = params + [offset, limit]
+        
+        cursor.execute(main_sql, tuple(main_params))
         results = cursor.fetchall()
         
         vehicles_list = []
@@ -256,7 +273,12 @@ async def search_vehicles(
             })
             
         conn.close()
-        return vehicles_list
+        
+        # 4. Return both the count and the page data
+        return {
+            "total_count": total_count,
+            "vehicles": vehicles_list
+        }
         
     except Exception as e:
         return {"error": str(e)}
