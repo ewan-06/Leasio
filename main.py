@@ -563,3 +563,62 @@ def login_customer(request: LoginRequest):
     except Exception as e:
         print(f"Login error: {e}")
         raise HTTPException(status_code=500, detail="An error occurred during login.")
+
+class QuoteRequest(BaseModel):
+    email: str
+    cap_code: str
+    make: str
+    model: str
+    derivative: str
+    term: int
+    mileage: int
+    initial: int
+    price: float
+    is_business: bool
+
+@app.post("/api/save_quote")
+def save_quote(req: QuoteRequest):
+    try:
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="leasio_user@leasio-server",
+            password=db_password,
+            database="Leasio_database"
+        )
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO dbo.SavedQuotes (UserEmail, CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness)
+            VALUES (%s, %s, %s, %s, %s, %d, %d, %d, %f, %d)
+        """, (req.email, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
+        
+        conn.commit()
+        conn.close()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/get_quotes")
+def get_quotes(email: str):
+    try:
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="leasio_user@leasio-server",
+            password=db_password,
+            database="Leasio_database"
+        )
+        cursor = conn.cursor(as_dict=True)
+        
+        cursor.execute("""
+            SELECT * FROM dbo.SavedQuotes 
+            WHERE UserEmail = %s 
+            ORDER BY SavedAt DESC
+        """, (email,))
+        
+        quotes = cursor.fetchall()
+        conn.close()
+        return quotes
+    except Exception as e:
+        return {"error": str(e)}
