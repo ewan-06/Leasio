@@ -5,6 +5,7 @@ from sqlalchemy import text
 import pymssql 
 import os
 import bcrypt
+from typing import Optional
 
 class QuoteRequest(BaseModel):
     email: str
@@ -14,7 +15,8 @@ class QuoteRequest(BaseModel):
     derivative: str
     term: int
     mileage: int
-    initial: int
+    initial: Optional[int] = None
+    Initial: Optional[int] = None
     price: float
     is_business: bool
 
