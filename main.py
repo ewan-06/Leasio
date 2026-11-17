@@ -588,7 +588,7 @@ def save_quote(req: QuoteRequest):
         )
         cursor = conn.cursor()
         
-        # 1. Look up the CustomerID using their encrypted email
+        # 1. Match the login logic exactly to find the CustomerID
         cursor.execute("""
             SELECT CustomerID 
             FROM dbo.Customers 
@@ -602,9 +602,9 @@ def save_quote(req: QuoteRequest):
             
         customer_id = user_row[0]
         
-        # 2. Insert the quote using the Foreign Key (CustomerID)
+        # 2. Save the quote using the retrieved CustomerID
         cursor.execute("""
-            INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness)
+            INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness)
             VALUES (%d, %s, %s, %s, %s, %d, %d, %d, %f, %d)
         """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
         
@@ -628,7 +628,7 @@ def get_quotes(email: str):
         )
         cursor = conn.cursor()
         
-        # 1. Look up the CustomerID using their encrypted email
+        # 1. Match the login logic exactly to find the CustomerID
         cursor.execute("""
             SELECT CustomerID 
             FROM dbo.Customers 
@@ -637,16 +637,15 @@ def get_quotes(email: str):
         
         user_row = cursor.fetchone()
         
-        # If the user doesn't exist, return an empty list rather than crashing
         if not user_row:
             conn.close()
             return []
             
         customer_id = user_row[0]
         
-        # 2. Fetch their quotes using CustomerID
+        # 2. Fetch the quotes using the retrieved CustomerID
         cursor.execute("""
-            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness 
+            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness 
             FROM dbo.SavedQuotes 
             WHERE CustomerID = %d 
             ORDER BY SavedAt DESC
@@ -663,8 +662,8 @@ def get_quotes(email: str):
                 "Derivative": row[3],
                 "Term": row[4],
                 "Mileage": row[5],
-                "Initial": row[6],
-                "MonthlyRental": float(row[7]) if row[7] else 0.0,
+                "InitialPayment": row[6],
+                "MonthlyPrice": float(row[7]) if row[7] else 0.0,
                 "IsBusiness": bool(row[8])
             })
             
