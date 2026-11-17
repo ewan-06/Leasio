@@ -23,7 +23,7 @@ app.add_middleware(
 
 # 1. THE CALCULATOR ENDPOINT
 @app.get("/api/calculate")
-async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int):
+async def calculate_monthly(cap_code: str, term: int, mileage: int, Initial: int):
     try:
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
@@ -35,7 +35,7 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int
         
         cursor = conn.cursor()
         cursor.execute("SELECT dbo.MonthlyRentalFunc(%s, %d, %d, %d)", 
-                       (cap_code, term, mileage, initial))
+                       (cap_code, term, mileage, Initial))
         result = cursor.fetchone()
         
         if result and result[0] is not None:
@@ -582,7 +582,7 @@ class QuoteRequest(BaseModel):
     derivative: str
     term: int
     mileage: int
-    initial: int
+    Initial: int
     price: float
     is_business: bool
 
@@ -614,9 +614,9 @@ def save_quote(req: QuoteRequest):
         
         # 2. Save the quote using the retrieved CustomerID
         cursor.execute("""
-            INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness)
+            INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness)
             VALUES (%d, %s, %s, %s, %s, %d, %d, %d, %f, %d)
-        """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
+        """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.Initial, req.price, 1 if req.is_business else 0))
         
         conn.commit()
         conn.close()
@@ -655,7 +655,7 @@ def get_quotes(email: str):
         
         # 2. Fetch the quotes using the retrieved CustomerID
         cursor.execute("""
-            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness 
+            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness 
             FROM dbo.SavedQuotes 
             WHERE CustomerID = %d 
             ORDER BY SavedAt DESC
@@ -672,8 +672,8 @@ def get_quotes(email: str):
                 "Derivative": row[3],
                 "Term": row[4],
                 "Mileage": row[5],
-                "InitialPayment": row[6],
-                "MonthlyPrice": float(row[7]) if row[7] else 0.0,
+                "Initial": row[6],
+                "MonthlyRental": float(row[7]) if row[7] else 0.0,
                 "IsBusiness": bool(row[8])
             })
             
