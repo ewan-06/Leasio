@@ -588,15 +588,32 @@ def save_quote(req: QuoteRequest):
         )
         cursor = conn.cursor()
         
+        # 1. Look up the CustomerID using their encrypted email
         cursor.execute("""
-            INSERT INTO dbo.SavedQuotes (UserEmail, CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness)
-            VALUES (%s, %s, %s, %s, %s, %d, %d, %d, %f, %d)
-        """, (req.email, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
+            SELECT CustomerID 
+            FROM dbo.Customers 
+            WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
+        """, (req.email.strip(),))
+        
+        user_row = cursor.fetchone()
+        if not user_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Customer not found.")
+            
+        customer_id = user_row[0]
+        
+        # 2. Insert the quote using the Foreign Key (CustomerID)
+        cursor.execute("""
+            INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness)
+            VALUES (%d, %s, %s, %s, %s, %d, %d, %d, %f, %d)
+        """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
         
         conn.commit()
         conn.close()
         return {"success": True}
+        
     except Exception as e:
+        print(f"Save Quote Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/get_quotes")
@@ -611,12 +628,29 @@ def get_quotes(email: str):
         )
         cursor = conn.cursor()
         
+        # 1. Look up the CustomerID using their encrypted email
+        cursor.execute("""
+            SELECT CustomerID 
+            FROM dbo.Customers 
+            WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
+        """, (email.strip(),))
+        
+        user_row = cursor.fetchone()
+        
+        # If the user doesn't exist, return an empty list rather than crashing
+        if not user_row:
+            conn.close()
+            return []
+            
+        customer_id = user_row[0]
+        
+        # 2. Fetch their quotes using CustomerID
         cursor.execute("""
             SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness 
             FROM dbo.SavedQuotes 
-            WHERE UserEmail = %s 
+            WHERE CustomerID = %d 
             ORDER BY SavedAt DESC
-        """, (email,))
+        """, (customer_id,))
         
         results = cursor.fetchall()
         
@@ -638,5 +672,5 @@ def get_quotes(email: str):
         return quotes
         
     except Exception as e:
-        print(f"SQL Error: {str(e)}") # Shows up in your Render logs
+        print(f"Get Quotes Error: {e}")
         return {"error": str(e)}
