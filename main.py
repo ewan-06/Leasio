@@ -587,7 +587,7 @@ def save_quote(req: QuoteRequest):
         )
         cursor = conn.cursor()
         
-        # 1. Match the login logic exactly to find the CustomerID
+        # 1. Look up CustomerID
         cursor.execute("""
             SELECT CustomerID 
             FROM dbo.Customers 
@@ -600,17 +600,36 @@ def save_quote(req: QuoteRequest):
             raise HTTPException(status_code=404, detail="Customer not found.")
             
         customer_id = user_row[0]
+
+        # 2. Get exact trimmed CAP code
+        exact_cap = req.cap_code.strip()
+        initial_val = req.Initial if req.Initial is not None else (req.initial or 9)
+        price_val = float(req.price)
+        business_val = 1 if req.is_business else 0
         
-        # 2. Save the quote using the retrieved CustomerID
+        # 3. Safe parameterized insertion (No raw string formatting!)
         cursor.execute("""
             INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness)
             VALUES (%d, %s, %s, %s, %s, %d, %d, %d, %f, %d)
-        """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
+        """, (
+            customer_id, 
+            exact_cap, 
+            req.make, 
+            req.model, 
+            req.derivative, 
+            int(req.term), 
+            int(req.mileage), 
+            int(initial_val), 
+            price_val, 
+            business_val
+        ))
         
         conn.commit()
         conn.close()
         return {"success": True}
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Save Quote Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
