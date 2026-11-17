@@ -609,16 +609,34 @@ def get_quotes(email: str):
             password=db_password,
             database="Leasio_database"
         )
-        cursor = conn.cursor(as_dict=True)
+        cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT * FROM dbo.SavedQuotes 
+            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness 
+            FROM dbo.SavedQuotes 
             WHERE UserEmail = %s 
             ORDER BY SavedAt DESC
         """, (email,))
         
-        quotes = cursor.fetchall()
+        results = cursor.fetchall()
+        
+        quotes = []
+        for row in results:
+            quotes.append({
+                "CAP_Code": row[0],
+                "Make": row[1],
+                "Model": row[2],
+                "Derivative": row[3],
+                "Term": row[4],
+                "Mileage": row[5],
+                "InitialPayment": row[6],
+                "MonthlyPrice": float(row[7]) if row[7] else 0.0,
+                "IsBusiness": bool(row[8])
+            })
+            
         conn.close()
         return quotes
+        
     except Exception as e:
+        print(f"SQL Error: {str(e)}") # Shows up in your Render logs
         return {"error": str(e)}
