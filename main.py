@@ -360,7 +360,6 @@ async def get_fuels(make: str = "", model: str = "", vehicle_type: str = "car"):
         return {"error": str(e)}
 
 # 4. THE SINGLE VEHICLE LOOKUP ENDPOINT
-# 4. THE SINGLE VEHICLE LOOKUP ENDPOINT
 @app.get("/api/vehicle")
 async def get_vehicle(cap_code: str):
     try:
@@ -556,16 +555,6 @@ def login_customer(request: LoginRequest):
                 "last_name": last_name,
                 "email": request.email.strip()
             }
-        }
-    # Verify the password with bcrypt
-        if not bcrypt.checkpw(request.password.encode('utf-8'), stored_hash_bytes):
-            raise HTTPException(status_code=401, detail="Invalid email or password.")
-            
-        # ADD THE EMAIL TO YOUR RETURN DICTIONARY
-        return {
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": request.email.strip() 
         }
         
     except HTTPException:
