@@ -23,7 +23,7 @@ app.add_middleware(
 
 # 1. THE CALCULATOR ENDPOINT
 @app.get("/api/calculate")
-async def calculate_monthly(cap_code: str, term: int, mileage: int, Initial: int):
+async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int):
     try:
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
@@ -35,7 +35,7 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, Initial: int
         
         cursor = conn.cursor()
         cursor.execute("SELECT dbo.MonthlyRentalFunc(%s, %d, %d, %d)", 
-                       (cap_code, term, mileage, Initial))
+                       (cap_code, term, mileage, initial))
         result = cursor.fetchone()
         
         if result and result[0] is not None:
@@ -582,7 +582,7 @@ class QuoteRequest(BaseModel):
     derivative: str
     term: int
     mileage: int
-    Initial: int
+    initial: int
     price: float
     is_business: bool
 
@@ -616,7 +616,7 @@ def save_quote(req: QuoteRequest):
         cursor.execute("""
             INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness)
             VALUES (%d, %s, %s, %s, %s, %d, %d, %d, %f, %d)
-        """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.Initial, req.price, 1 if req.is_business else 0))
+        """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
         
         conn.commit()
         conn.close()
