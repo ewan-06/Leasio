@@ -557,6 +557,16 @@ def login_customer(request: LoginRequest):
                 "email": request.email.strip()
             }
         }
+    # Verify the password with bcrypt
+        if not bcrypt.checkpw(request.password.encode('utf-8'), stored_hash_bytes):
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+            
+        # ADD THE EMAIL TO YOUR RETURN DICTIONARY
+        return {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": request.email.strip() 
+        }
         
     except HTTPException:
         raise
