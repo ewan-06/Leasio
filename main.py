@@ -604,7 +604,7 @@ def save_quote(req: QuoteRequest):
         
         # 2. Insert the quote using the Foreign Key (CustomerID)
         cursor.execute("""
-            INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness)
+            INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness)
             VALUES (%d, %s, %s, %s, %s, %d, %d, %d, %f, %d)
         """, (customer_id, req.cap_code, req.make, req.model, req.derivative, req.term, req.mileage, req.initial, req.price, 1 if req.is_business else 0))
         
@@ -646,7 +646,7 @@ def get_quotes(email: str):
         
         # 2. Fetch their quotes using CustomerID
         cursor.execute("""
-            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, InitialPayment, MonthlyPrice, IsBusiness 
+            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness 
             FROM dbo.SavedQuotes 
             WHERE CustomerID = %d 
             ORDER BY SavedAt DESC
@@ -663,8 +663,8 @@ def get_quotes(email: str):
                 "Derivative": row[3],
                 "Term": row[4],
                 "Mileage": row[5],
-                "InitialPayment": row[6],
-                "MonthlyPrice": float(row[7]) if row[7] else 0.0,
+                "Initial": row[6],
+                "MonthlyRental": float(row[7]) if row[7] else 0.0,
                 "IsBusiness": bool(row[8])
             })
             
