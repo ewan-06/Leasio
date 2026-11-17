@@ -6,6 +6,18 @@ import pymssql
 import os
 import bcrypt
 
+class QuoteRequest(BaseModel):
+    email: str
+    cap_code: str
+    make: str
+    model: str
+    derivative: str
+    term: int
+    mileage: int
+    initial: int
+    price: float
+    is_business: bool
+
 app = FastAPI()
 
 app.add_middleware(
@@ -562,18 +574,6 @@ def login_customer(request: LoginRequest):
     except Exception as e:
         print(f"Login error: {e}")
         raise HTTPException(status_code=500, detail="An error occurred during login.")
-
-class QuoteRequest(BaseModel):
-    email: str
-    cap_code: str
-    make: str
-    model: str
-    derivative: str
-    term: int
-    mileage: int
-    initial: int
-    price: float
-    is_business: bool
 
 @app.post("/api/save_quote")
 def save_quote(req: QuoteRequest):
