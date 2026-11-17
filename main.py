@@ -603,16 +603,16 @@ def save_quote(req: QuoteRequest):
             
         customer_id = user_row[0]
 
-        # 2. Get exact trimmed CAP code
+        # 2. Get exact trimmed CAP code and values
         exact_cap = req.cap_code.strip()
         initial_val = req.Initial if req.Initial is not None else (req.initial or 9)
         price_val = float(req.price)
         business_val = 1 if req.is_business else 0
         
-        # 3. Safe parameterized insertion (No raw string formatting!)
+        # 3. Use %s universally for all parameters in pymssql
         cursor.execute("""
             INSERT INTO dbo.SavedQuotes (CustomerID, CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness)
-            VALUES (%d, %s, %s, %s, %s, %d, %d, %d, %f, %d)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             customer_id, 
             exact_cap, 
