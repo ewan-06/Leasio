@@ -636,6 +636,10 @@ def save_quote(req: QuoteRequest):
         print(f"Save Quote Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+class DeleteQuoteRequest(BaseModel):
+    email: str
+    quote_id: int
+
 @app.get("/api/get_quotes")
 def get_quotes(email: str):
     try:
@@ -647,49 +651,92 @@ def get_quotes(email: str):
             database="Leasio_database"
         )
         cursor = conn.cursor()
-        
-        # 1. Match the login logic exactly to find the CustomerID
+
         cursor.execute("""
             SELECT CustomerID 
             FROM dbo.Customers 
             WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
         """, (email.strip(),))
-        
         user_row = cursor.fetchone()
-        
         if not user_row:
             conn.close()
             return []
-            
+
         customer_id = user_row[0]
-        
-        # 2. Fetch the quotes using the retrieved CustomerID
+
+        # Automatically purge quotes older than 30 days
         cursor.execute("""
-            SELECT CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness 
+            DELETE FROM dbo.SavedQuotes 
+            WHERE CustomerID = %s 
+              AND SavedAt < DATEADD(day, -30, SYSDATETIME())
+        """, (customer_id,))
+        conn.commit()
+
+        # Fetch remaining active quotes
+        cursor.execute("""
+            SELECT QuoteID, CAP_Code, Make, Model, Derivative, Term, Mileage, Initial, MonthlyRental, IsBusiness, SavedAt
             FROM dbo.SavedQuotes 
-            WHERE CustomerID = %d 
+            WHERE CustomerID = %s
             ORDER BY SavedAt DESC
         """, (customer_id,))
-        
-        results = cursor.fetchall()
-        
-        quotes = []
-        for row in results:
-            quotes.append({
-                "CAP_Code": row[0],
-                "Make": row[1],
-                "Model": row[2],
-                "Derivative": row[3],
-                "Term": row[4],
-                "Mileage": row[5],
-                "Initial": row[6],
-                "MonthlyRental": float(row[7]) if row[7] else 0.0,
-                "IsBusiness": bool(row[8])
-            })
-            
+
+        rows = cursor.fetchall()
         conn.close()
-        return quotes
-        
+
+        return [
+            {
+                "QuoteID": r[0],
+                "CAP_Code": r[1].strip() if r[1] else "",
+                "Make": r[2],
+                "Model": r[3],
+                "Derivative": r[4],
+                "Term": r[5],
+                "Mileage": r[6],
+                "Initial": r[7],
+                "MonthlyRental": float(r[8]) if r[8] is not None else 0.0,
+                "IsBusiness": bool(r[9]),
+                "SavedAt": r[10].isoformat() if r[10] else None
+            }
+            for r in rows
+        ]
     except Exception as e:
         print(f"Get Quotes Error: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/delete_quote")
+def delete_quote(req: DeleteQuoteRequest):
+    try:
+        db_password = os.getenv("SQL_USER_PASSWORD", "")
+        conn = pymssql.connect(
+            server="leasio-server.database.windows.net",
+            user="leasio_user@leasio-server",
+            password=db_password,
+            database="Leasio_database"
+        )
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT CustomerID 
+            FROM dbo.Customers 
+            WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
+        """, (req.email.strip(),))
+        user_row = cursor.fetchone()
+        if not user_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Customer not found.")
+
+        customer_id = user_row[0]
+
+        cursor.execute("""
+            DELETE FROM dbo.SavedQuotes 
+            WHERE QuoteID = %s AND CustomerID = %s
+        """, (req.quote_id, customer_id))
+
+        conn.commit()
+        conn.close()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Delete Quote Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
