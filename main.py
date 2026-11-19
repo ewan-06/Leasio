@@ -376,6 +376,15 @@ async def get_makes(vehicle_type: str = "car"):
     makes_list = sorted({v["Make"] for v in items if v["Make"]})
     return {"makes": makes_list}
 
+class RegisterRequest(BaseModel):
+    first_name: str
+    last_name: str
+    date_of_birth: str
+    email: str
+    phone: str
+    address: str
+    password: str
+
 @app.post("/api/register")
 def register_customer(request: RegisterRequest):
     try:
@@ -498,6 +507,19 @@ def login_customer(request: LoginRequest):
     except Exception as e:
         print(f"Login error: {e}")
         raise HTTPException(status_code=500, detail="An error occurred during login.")
+
+class QuoteRequest(BaseModel):
+    email: str
+    cap_code: str
+    make: str
+    model: str
+    derivative: str
+    term: int
+    mileage: int
+    initial: int = 9
+    Initial: int | None = None
+    price: float
+    is_business: bool
 
 @app.post("/api/save_quote")
 def save_quote(req: QuoteRequest):
