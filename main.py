@@ -684,3 +684,19 @@ def delete_quote(req: DeleteQuoteRequest):
     except Exception as e:
         print(f"Delete Quote Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+        
+class EnquiryRequest(BaseModel):
+    first_name: str
+    last_name: str
+    phone: str
+    email: str
+    agreed_terms: bool
+    cap_code: str = ""
+    vehicle_type: str = "car"
+
+@app.post("/api/enquire")
+def submit_enquiry(req: EnquiryRequest):
+    if not req.agreed_terms:
+        raise HTTPException(status_code=400, detail="You must agree to the terms and conditions.")
+    # Optional: insert into a dbo.Enquiries table in Azure SQL using pymssql and %s placeholders
+    return {"success": True, "message": "Enquiry received."}
