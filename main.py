@@ -2,25 +2,98 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
+from contextlib import asynccontextmanager
+import asyncio
+import time
 import pymssql 
 import os
 import bcrypt
-from typing import Optional
 
-class QuoteRequest(BaseModel):
-    email: str
-    cap_code: str
-    make: str
-    model: str
-    derivative: str
-    term: int
-    mileage: int
-    initial: Optional[int] = None
-    Initial: Optional[int] = None
-    price: float
-    is_business: bool
+VEHICLE_CACHE = {
+    "car": [],
+    "vans": [],
+    "last_updated": 0
+}
 
-app = FastAPI()
+CACHE_REFRESH_SECONDS = 900  # Refresh every 15 minutes
+
+def fetch_vehicles_from_azure():
+    db_password = os.getenv("SQL_USER_PASSWORD", "")
+    conn = pymssql.connect(
+        server="leasio-server.database.windows.net",
+        user="leasio_user@leasio-server",
+        password=db_password,
+        database="Leasio_database"
+    )
+    cursor = conn.cursor()
+
+    def load_for_type(rv_table):
+        cursor.execute(f"""
+            SELECT 
+                c.Manufacturer, 
+                c.Model, 
+                c.CAP_Derivative, 
+                c.Fuel, 
+                c.CAP_Code,
+                TRY_CAST(b.Monthly AS FLOAT) AS MonthlyFloat,
+                TRY_CAST(b.[Monthly/OTR] AS FLOAT) AS ScoreFloat,
+                vt.size,
+                vt.bodytype
+            FROM dbo.Conduit c
+            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
+            LEFT JOIN dbo.BestOffers b ON c.CAP_Code = b.CAP_Code
+            LEFT JOIN dbo.vehicle_types vt 
+                ON c.Manufacturer = vt.Make 
+                AND c.Model = vt.Model 
+                AND c.CAP_Derivative = vt.Derivative
+        """)
+        rows = cursor.fetchall()
+        items = []
+        for r in rows:
+            monthly_val = round(float(r[5]), 2) if r[5] is not None else None
+            score_val = float(r[6]) if (r[6] is not None and r[6] > 0) else None
+            items.append({
+                "Make": r[0] or "",
+                "Model": r[1] or "",
+                "CAP_Derivative": r[2] if r[2] else "Standard Spec",
+                "Fuel": r[3] if r[3] else "Electric",
+                "CAP_Code": r[4],
+                "Monthly": monthly_val if monthly_val is not None else "POA",
+                "_monthly_num": monthly_val,
+                "_score": score_val,
+                "_size": (r[7] or "").strip().lower(),
+                "_bodytype": (r[8] or "").strip().lower()
+            })
+        return items
+
+    cars = load_for_type("dbo.Car_RVs")
+    vans = load_for_type("dbo.LCV_RVs")
+    conn.close()
+    return cars, vans
+
+async def refresh_cache_once():
+    try:
+        cars, vans = await asyncio.to_thread(fetch_vehicles_from_azure)
+        VEHICLE_CACHE["car"] = cars
+        VEHICLE_CACHE["vans"] = vans
+        VEHICLE_CACHE["last_updated"] = time.time()
+        print(f"Cache refreshed: {len(cars)} cars, {len(vans)} vans")
+    except Exception as e:
+        print(f"Cache refresh failed: {e}")
+
+async def periodic_cache_worker():
+    while True:
+        await asyncio.sleep(CACHE_REFRESH_SECONDS)
+        await refresh_cache_once()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await refresh_cache_once()
+    task = asyncio.create_task(periodic_cache_worker())
+    yield
+    task.cancel()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -173,7 +246,6 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly
     except Exception as e:
         return {"error": str(e)}
 
-# 3. THE FILTERABLE SEARCH ENDPOINT (Updated with Server-Side Pagination)
 @app.get("/api/search_vehicles")
 async def search_vehicles(
     make: str = "Any make", 
@@ -184,194 +256,77 @@ async def search_vehicles(
     max_price: float = 0,
     size: str = "",
     bodytype: str = "",
-    page: int = 1,      # <-- New parameter
-    limit: int = 24     # <-- New parameter
+    page: int = 1,
+    limit: int = 24
 ):
+    v_type = "vans" if vehicle_type.lower() == "vans" else "car"
+    results = VEHICLE_CACHE.get(v_type, [])
+
+    if make and make != "Any make":
+        m_low = make.strip().lower()
+        results = [v for v in results if v["Make"].lower() == m_low]
+
+    if fuel and fuel != "Any fuel type":
+        f_low = fuel.strip().lower()
+        results = [v for v in results if v["Fuel"].lower() == f_low]
+
+    if model:
+        mod_low = model.strip().lower()
+        results = [v for v in results if mod_low in v["Model"].lower()]
+
+    if max_price and 0 < max_price < 2000:
+        results = [v for v in results if v["_monthly_num"] is not None and v["_monthly_num"] <= float(max_price)]
+
+    if size:
+        s_low = size.strip().lower()
+        results = [v for v in results if v["_size"] == s_low]
+
+    if bodytype:
+        b_low = bodytype.strip().lower()
+        results = [v for v in results if v["_bodytype"] == b_low]
+
+    # Sort matching your exact SQL ORDER BY rules
+    if sort == "price_asc":
+        results = sorted(results, key=lambda v: (v["_monthly_num"] is None, v["_monthly_num"] or 0))
+    elif sort == "price_desc":
+        results = sorted(results, key=lambda v: v["_monthly_num"] if v["_monthly_num"] is not None else -1, reverse=True)
+    else:
+        results = sorted(results, key=lambda v: (v["_score"] is None, v["_score"] or 0))
+
+    total_count = len(results)
     offset = (page - 1) * limit
-    try:
-        db_password = os.getenv("SQL_USER_PASSWORD", "")
-        conn = pymssql.connect(
-            server="leasio-server.database.windows.net",
-            user="leasio_user@leasio-server",
-            password=db_password,
-            database="Leasio_database"
-        )
-        cursor = conn.cursor()
-        
-        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
+    page_items = [
+        {k: v[k] for k in ("Make", "Model", "CAP_Derivative", "Fuel", "CAP_Code", "Monthly")}
+        for v in results[offset:offset + limit]
+    ]
 
-        # Configure sorting based on user selection
-        if sort == "price_asc":
-            order_clause = "ORDER BY CASE WHEN TRY_CAST(b.Monthly AS FLOAT) IS NULL THEN 1 ELSE 0 END, TRY_CAST(b.Monthly AS FLOAT) ASC"
-        elif sort == "price_desc":
-            order_clause = "ORDER BY TRY_CAST(b.Monthly AS FLOAT) DESC"
-        else:
-            # DEFAULT / RELEVANCE: Sort by Best Value
-            order_clause = "ORDER BY CASE WHEN TRY_CAST(b.[Monthly/OTR] AS FLOAT) IS NULL OR TRY_CAST(b.[Monthly/OTR] AS FLOAT) <= 0 THEN 1 ELSE 0 END, TRY_CAST(b.[Monthly/OTR] AS FLOAT) ASC"
-
-        # 1. Build the base FROM and WHERE clauses to share between COUNT and SELECT
-        base_sql = f"""
-            FROM dbo.Conduit c
-            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
-            LEFT JOIN dbo.BestOffers b ON c.CAP_Code = b.CAP_Code
-            LEFT JOIN dbo.vehicle_types vt 
-                ON c.Manufacturer = vt.Make 
-                AND c.Model = vt.Model 
-                AND c.CAP_Derivative = vt.Derivative
-            WHERE 1=1
-        """
-        
-        where_clauses = ""
-        params = []
-        
-        if make and make != "Any make":
-            where_clauses += " AND LOWER(c.Manufacturer) = LOWER(%s)"
-            params.append(make.strip())
-            
-        if fuel and fuel != "Any fuel type":
-            where_clauses += " AND LOWER(c.Fuel) = LOWER(%s)"
-            params.append(fuel.strip())
-            
-        if model:
-            where_clauses += " AND LOWER(c.Model) LIKE LOWER(%s)"
-            params.append(f"%{model.strip()}%")
-
-        if max_price and max_price > 0 and max_price < 2000:
-            where_clauses += " AND TRY_CAST(b.Monthly AS FLOAT) IS NOT NULL AND TRY_CAST(b.Monthly AS FLOAT) <= %s"
-            params.append(float(max_price))
-
-        if size:
-            where_clauses += " AND LOWER(vt.size) = LOWER(%s)"
-            params.append(size.strip())
-
-        if bodytype:
-            where_clauses += " AND LOWER(vt.bodytype) = LOWER(%s)"
-            params.append(bodytype.strip())
-
-        # 2. Get the Total Count of matching vehicles
-        count_sql = f"SELECT COUNT(*) {base_sql} {where_clauses}"
-        cursor.execute(count_sql, tuple(params))
-        total_count = cursor.fetchone()[0]
-
-        # 3. Fetch only the specific page of vehicles
-        main_sql = f"""
-            SELECT 
-                c.Manufacturer, 
-                c.Model, 
-                c.CAP_Derivative, 
-                c.Fuel, 
-                c.CAP_Code,
-                b.Monthly
-            {base_sql} 
-            {where_clauses}
-            {order_clause}
-            OFFSET %d ROWS
-            FETCH NEXT %d ROWS ONLY
-        """
-        
-        # Add offset and limit to the end of the parameters array
-        main_params = params + [offset, limit]
-        
-        cursor.execute(main_sql, tuple(main_params))
-        results = cursor.fetchall()
-        
-        vehicles_list = []
-        for row in results:
-            vehicles_list.append({
-                "Make": row[0],
-                "Model": row[1],
-                "CAP_Derivative": row[2] if row[2] else "Standard Spec",
-                "Fuel": row[3] if row[3] else "Electric",
-                "CAP_Code": row[4],
-                "Monthly": round(float(row[5]), 2) if row[5] else "POA"
-            })
-            
-        conn.close()
-        
-        # 4. Return both the count and the page data
-        return {
-            "total_count": total_count,
-            "vehicles": vehicles_list
-        }
-        
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "total_count": total_count,
+        "vehicles": page_items
+    }
 
 
 @app.get("/api/get_models")
 async def get_models(make: str, vehicle_type: str = "car"):
-    try:
-        db_password = os.getenv("SQL_USER_PASSWORD", "")
-        conn = pymssql.connect(
-            server="leasio-server.database.windows.net",
-            user="leasio_user@leasio-server",
-            password=db_password,
-            database="Leasio_database"
-        )
-        
-        cursor = conn.cursor()
-        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
-
-        cursor.execute(f"""
-            SELECT DISTINCT c.Model 
-            FROM dbo.Conduit c
-            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
-            WHERE LOWER(c.Manufacturer) = LOWER(%s)
-            ORDER BY c.Model ASC
-        """, (make.strip(),))
-        
-        results = cursor.fetchall()
-        models_list = [row[0] for row in results if row[0]]
-        
-        conn.close()
-        return {"models": models_list}
-        
-    except Exception as e:
-        return {"error": str(e)}
+    v_type = "vans" if vehicle_type.lower() == "vans" else "car"
+    m_low = make.strip().lower()
+    items = VEHICLE_CACHE.get(v_type, [])
+    models_list = sorted({v["Model"] for v in items if v["Model"] and v["Make"].lower() == m_low})
+    return {"models": models_list}
 
 
 @app.get("/api/get_fuels")
 async def get_fuels(make: str = "", model: str = "", vehicle_type: str = "car"):
-    try:
-        db_password = os.getenv("SQL_USER_PASSWORD", "")
-        conn = pymssql.connect(
-            server="leasio-server.database.windows.net",
-            user="leasio_user@leasio-server",
-            password=db_password,
-            database="Leasio_database"
-        )
-        
-        cursor = conn.cursor()
-        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
-
-        sql = f"""
-            SELECT DISTINCT c.Fuel 
-            FROM dbo.Conduit c
-            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
-            WHERE c.Fuel IS NOT NULL AND c.Fuel != ''
-        """
-        params = []
-        
-        if make and make != "Any make":
-            sql += " AND LOWER(c.Manufacturer) = LOWER(%s)"
-            params.append(make.strip())
-            
-        if model:
-            sql += " AND LOWER(c.Model) = LOWER(%s)"
-            params.append(model.strip())
-            
-        sql += " ORDER BY c.Fuel ASC"
-        
-        cursor.execute(sql, tuple(params))
-        results = cursor.fetchall()
-        
-        fuels_list = [row[0] for row in results if row[0]]
-        
-        conn.close()
-        return {"fuels": fuels_list}
-        
-    except Exception as e:
-        return {"error": str(e)}
+    v_type = "vans" if vehicle_type.lower() == "vans" else "car"
+    items = VEHICLE_CACHE.get(v_type, [])
+    if make and make != "Any make":
+        m_low = make.strip().lower()
+        items = [v for v in items if v["Make"].lower() == m_low]
+    if model:
+        mod_low = model.strip().lower()
+        items = [v for v in items if v["Model"].lower() == mod_low]
+    fuels_list = sorted({v["Fuel"] for v in items if v["Fuel"]})
+    return {"fuels": fuels_list}
 
 # 4. THE SINGLE VEHICLE LOOKUP ENDPOINT
 @app.get("/api/vehicle")
@@ -416,43 +371,10 @@ async def get_vehicle(cap_code: str):
 
 @app.get("/api/get_makes")
 async def get_makes(vehicle_type: str = "car"):
-    try:
-        db_password = os.getenv("SQL_USER_PASSWORD", "")
-        conn = pymssql.connect(
-            server="leasio-server.database.windows.net",
-            user="leasio_user@leasio-server",
-            password=db_password,
-            database="Leasio_database"
-        )
-        cursor = conn.cursor()
-        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
-
-        cursor.execute(f"""
-            SELECT DISTINCT c.Manufacturer 
-            FROM dbo.Conduit c
-            INNER JOIN {rv_table} rv ON c.CAP_Code = rv.CAP_Code
-            WHERE c.Manufacturer IS NOT NULL AND c.Manufacturer != ''
-            ORDER BY c.Manufacturer ASC
-        """)
-        
-        results = cursor.fetchall()
-        makes_list = [row[0] for row in results if row[0]]
-        
-        conn.close()
-        return {"makes": makes_list}
-        
-    except Exception as e:
-        return {"error": str(e)}
-
-# Define the expected JSON payload from the frontend
-class RegisterRequest(BaseModel):
-    first_name: str
-    last_name: str
-    date_of_birth: str
-    email: str
-    phone: str
-    address: str
-    password: str
+    v_type = "vans" if vehicle_type.lower() == "vans" else "car"
+    items = VEHICLE_CACHE.get(v_type, [])
+    makes_list = sorted({v["Make"] for v in items if v["Make"]})
+    return {"makes": makes_list}
 
 @app.post("/api/register")
 def register_customer(request: RegisterRequest):
