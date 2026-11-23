@@ -121,7 +121,7 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int
         )
         
         cursor = conn.cursor()
-        cursor.execute("SELECT dbo.MonthlyRentalFunc(%s, %d, %d, %d)", 
+        cursor.execute("SELECT dbo.RentalWithFees(%s, %d, %d, %d)", 
                        (cap_code, term, mileage, initial))
         result = cursor.fetchone()
         
@@ -344,7 +344,7 @@ async def get_vehicle(cap_code: str):
         
         # Added the tech spec columns to the SELECT statement
         cursor.execute("""
-            SELECT Manufacturer, Model, CAP_Derivative, Fuel, Eng_size, KW, BHP_code
+            SELECT Manufacturer, Model, CAP_Derivative, Fuel, FLOOR(ModYr) AS ModYr, Eng_size, KW, BHP_code
             FROM dbo.Conduit 
             WHERE CAP_Code = %s
         """, (cap_code.strip(),))
@@ -359,9 +359,10 @@ async def get_vehicle(cap_code: str):
                 "Model": row[1], 
                 "CAP_Derivative": row[2] if row[2] else "Standard Spec", 
                 "Fuel": row[3] if row[3] else "Electric",
-                "EngineSize": f"{row[4]} cc" if row[4] else "N/A",
-                "PowerKW": f"{row[5]} kW" if row[5] else "N/A",
-                "BHP": str(row[6]) if row[6] else "N/A"
+                "ModYr" str(row[4]) if row[4] else ""
+                "EngineSize": f"{row[5]} cc" if row[5] else "N/A",
+                "PowerKW": f"{row[6]} kW" if row[6] else "N/A",
+                "BHP": str(row[7]) if row[7] else "N/A"
             }
         else:
             return {"error": "Vehicle not found"}
