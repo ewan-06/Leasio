@@ -121,8 +121,10 @@ async def calculate_monthly(cap_code: str, term: int, mileage: int, initial: int
         )
         
         cursor = conn.cursor()
-        cursor.execute("SELECT dbo.RentalWithFees(%s, %d, %d, %d)", 
-                       (cap_code, term, mileage, initial))
+        cursor.execute(
+            "SELECT dbo.RentalWithFees(%s, %s, %s, %s)",
+            (cap_code.strip(), int(term), int(mileage), int(initial))
+        )
         result = cursor.fetchone()
         
         if result and result[0] is not None:
