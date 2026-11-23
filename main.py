@@ -359,7 +359,7 @@ async def get_vehicle(cap_code: str):
                 "Model": row[1], 
                 "CAP_Derivative": row[2] if row[2] else "Standard Spec", 
                 "Fuel": row[3] if row[3] else "Electric",
-                "ModYr" str(row[4]) if row[4] else ""
+                "ModYr": str(row[4]) if row[4] else "",
                 "EngineSize": f"{row[5]} cc" if row[5] else "N/A",
                 "PowerKW": f"{row[6]} kW" if row[6] else "N/A",
                 "BHP": str(row[7]) if row[7] else "N/A"
