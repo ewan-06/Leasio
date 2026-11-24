@@ -518,7 +518,7 @@ class QuoteRequest(BaseModel):
     derivative: str
     term: int
     mileage: int
-    initial: int = 9
+    initial: int = 12
     Initial: int | None = None
     price: float
     is_business: bool
@@ -551,7 +551,7 @@ def save_quote(req: QuoteRequest):
 
         # 2. Get exact trimmed CAP code and values
         exact_cap = req.cap_code.strip()
-        initial_val = req.Initial if req.Initial is not None else (req.initial or 9)
+        initial_val = req.Initial if req.Initial is not None else (req.initial or 12)
         price_val = float(req.price)
         business_val = 1 if req.is_business else 0
         
