@@ -346,7 +346,8 @@ async def get_vehicle(cap_code: str):
         
         # Added the tech spec columns to the SELECT statement
         cursor.execute("""
-            SELECT Manufacturer, Model, CAP_Derivative, Fuel, Eng_size, KW, BHP_code
+            SELECT Manufacturer, Model, CAP_Derivative, Fuel, Eng_size, KW, BHP_code,
+                CAST(FLOOR(TRY_CAST(ModYr AS FLOAT)) AS INT) AS ModYr
             FROM dbo.Conduit 
             WHERE CAP_Code = %s
         """, (cap_code.strip(),))
