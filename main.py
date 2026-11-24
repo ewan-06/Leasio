@@ -363,7 +363,8 @@ async def get_vehicle(cap_code: str):
                 "Fuel": row[3] if row[3] else "Electric",
                 "EngineSize": f"{row[4]} cc" if row[4] else "N/A",
                 "PowerKW": f"{row[5]} kW" if row[5] else "N/A",
-                "BHP": str(row[6]) if row[6] else "N/A"
+                "BHP": str(row[6]) if row[6] else "N/A",
+                "ModYr": str(row[7]) if row[7] else ""
             }
         else:
             return {"error": "Vehicle not found"}
