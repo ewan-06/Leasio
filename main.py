@@ -177,6 +177,46 @@ async def get_vehicle_types(make: str, model: str, fuel: str):
 
 @app.get("/api/best_offers")
 async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly: float = 0):
+    v_type = "vans" if vehicle_type.lower() == "vans" else "car"
+
+    # Cars default to £400 max, Vans default to £800 max
+    if max_monthly <= 0:
+        max_monthly = 800.0 if v_type == "vans" else 400.0
+
+    # 1. Fast path: serve directly from VEHICLE_CACHE (~1-2ms)
+    cached_items = VEHICLE_CACHE.get(v_type, []) if "VEHICLE_CACHE" in globals() else []
+    if cached_items:
+        eligible = [
+            v for v in cached_items
+            if v.get("_monthly_num") is not None
+            and v.get("_score") is not None
+            and v["_score"] > 0
+            and v["_monthly_num"] <= max_monthly
+        ]
+
+        # Keep the single best-ranked derivative per (Make, Model)
+        best_per_model = {}
+        for v in eligible:
+            key = (str(v.get("Make", "")).lower(), str(v.get("Model", "")).lower())
+            rank = (v["_score"], v["_monthly_num"])
+            if key not in best_per_model or rank < best_per_model[key][0]:
+                best_per_model[key] = (rank, v)
+
+        top_offers = sorted(best_per_model.values(), key=lambda pair: pair[0])[:limit]
+
+        return [
+            {
+                "Make": v.get("Make", ""),
+                "Model": v.get("Model", ""),
+                "CAP_Derivative": v.get("CAP_Derivative") or "Standard Spec",
+                "Fuel": v.get("Fuel") or "Electric",
+                "CAP_Code": v.get("CAP_Code", ""),
+                "Monthly": round(float(v["_monthly_num"]), 2)
+            }
+            for _, v in top_offers
+        ]
+
+    # 2. Fallback: query Azure SQL only if cache is still warming up
     try:
         db_password = os.getenv("SQL_USER_PASSWORD", "")
         conn = pymssql.connect(
@@ -186,13 +226,8 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly
             database="Leasio_database"
         )
         cursor = conn.cursor()
-        
-        rv_table = "dbo.LCV_RVs" if vehicle_type.lower() == "vans" else "dbo.Car_RVs"
 
-        # Apply default smart price caps if none are explicitly requested:
-        # Cars default to £400 max, Vans default to £800 max
-        if max_monthly <= 0:
-            max_monthly = 800.0 if vehicle_type.lower() == "vans" else 400.0
+        rv_table = "dbo.LCV_RVs" if v_type == "vans" else "dbo.Car_RVs"
 
         sql = f"""
             WITH RankedOffers AS (
@@ -227,10 +262,10 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly
             WHERE rn = 1
             ORDER BY Score ASC
         """
-        
+
         cursor.execute(sql, (max_monthly, limit))
         results = cursor.fetchall()
-        
+
         offers = []
         for row in results:
             offers.append({
@@ -241,13 +276,12 @@ async def get_best_offers(vehicle_type: str = "car", limit: int = 9, max_monthly
                 "CAP_Code": row[4],
                 "Monthly": round(float(row[5]), 2) if row[5] else "POA"
             })
-            
+
         conn.close()
         return offers
-        
+
     except Exception as e:
         return {"error": str(e)}
-
 @app.get("/api/search_vehicles")
 async def search_vehicles(
     make: str = "Any make", 
