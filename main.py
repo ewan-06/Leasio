@@ -3,11 +3,105 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from contextlib import asynccontextmanager
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from typing import Optional
 import asyncio
 import time
 import pymssql 
 import os
 import bcrypt
+import os
+import requests
+
+class EnquiryRequest(BaseModel):
+    is_logged_in: bool = False
+    customer_id: Optional[int] = None
+    first_name: str = ""
+    last_name: str = ""
+    email: str
+    phone: str = ""
+    address: str = ""
+    cap_code: str
+    vehicle_type: str = "car"
+    make: str = ""
+    model: str = ""
+    derivative: str = ""
+    term: int = 48
+    mileage: int = 5000
+    initial_months: int = 12
+    initial_amount: str = ""
+    monthly_price: str = ""
+    vat_status: str = "inc VAT"
+    agreed_terms: bool = True
+
+@app.post("/api/enquire")
+def submit_enquiry(req: EnquiryRequest):
+    timestamp_uk = datetime.now(ZoneInfo("Europe/London")).strftime("%d %b %Y at %H:%M:%S %Z")
+
+    customer_number = "Guest (Not signed in)"
+    first_name, last_name, phone, address = req.first_name, req.last_name, req.phone, req.address
+
+    if req.is_logged_in:
+        # Query your Azure SQL Customers table by req.email
+        # Adjust column names to match your exact schema (e.g., CustomerID, FirstName, LastName, Phone, Address)
+        cursor.execute(
+            "SELECT CustomerID, FirstName, LastName, Phone, Address FROM Customers WHERE Email = %s",
+            (req.email,),
+        )
+        row = cursor.fetchone()
+        if row:
+            customer_number = str(row["CustomerID"])
+            first_name = row["FirstName"] or first_name
+            last_name = row["LastName"] or last_name
+            phone = row["Phone"] or phone
+            address = row["Address"] or address
+
+    html = f"""
+    <h2>New Vehicle Lease Enquiry</h2>
+    <p><strong>Received:</strong> {timestamp_uk}</p>
+    <h3>Customer Details</h3>
+    <ul>
+      <li><strong>Customer Number:</strong> {customer_number}</li>
+      <li><strong>Name:</strong> {first_name} {last_name}</li>
+      <li><strong>Email:</strong> {req.email}</li>
+      <li><strong>Phone:</strong> {phone}</li>
+      <li><strong>Address:</strong> {address}</li>
+    </ul>
+    <h3>Vehicle &amp; Deal Summary</h3>
+    <ul>
+      <li><strong>Vehicle:</strong> {req.make} {req.model} — {req.derivative}</li>
+      <li><strong>Type / CAP Code:</strong> {req.vehicle_type.upper()} / {req.cap_code}</li>
+      <li><strong>Monthly Rental:</strong> {req.monthly_price}/mo ({req.vat_status})</li>
+      <li><strong>Initial Rental:</strong> {req.initial_months} months ({req.initial_amount})</li>
+      <li><strong>Contract Term:</strong> {req.term} months</li>
+      <li><strong>Annual Mileage:</strong> {req.mileage:,} miles/yr</li>
+    </ul>
+    """
+
+    send_email(
+        to=ENQUIRIES_TO,
+        subject=f"New Enquiry: {req.make} {req.model} ({req.monthly_price}/mo {req.vat_status})",
+        html=html,
+        reply_to=req.email,
+    )
+    return {"status": "sent", "timestamp": timestamp_uk}
+
+EMAIL_API_KEY = os.getenv("EMAIL_API_KEY")
+NOREPLY_FROM = os.getenv("NOREPLY_FROM_EMAIL", "Leasio <noreply@leasio.co.uk>")
+ENQUIRIES_TO = os.getenv("ENQUIRIES_TO_EMAIL", "enquiries@leasio.co.uk")
+
+def send_email(to: str, subject: str, html: str, reply_to: str | None = None):
+    payload = {"from": NOREPLY_FROM, "to": [to], "subject": subject, "html": html}
+    if reply_to:
+        payload["reply_to"] = reply_to
+    res = requests.post(
+        "https://api.resend.com/emails",
+        headers={"Authorization": f"Bearer {EMAIL_API_KEY}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=10,
+    )
+    res.raise_for_status()
 
 VEHICLE_CACHE = {
     "car": [],
