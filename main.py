@@ -1,107 +1,59 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
-from sqlalchemy import text
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional
 import asyncio
+import hashlib
+import os
+import secrets
 import time
-import pymssql 
-import os
+import pymssql
 import bcrypt
-import os
 import requests
 
-class EnquiryRequest(BaseModel):
-    is_logged_in: bool = False
-    customer_id: Optional[int] = None
-    first_name: str = ""
-    last_name: str = ""
-    email: str
-    phone: str = ""
-    address: str = ""
-    cap_code: str
-    vehicle_type: str = "car"
-    make: str = ""
-    model: str = ""
-    derivative: str = ""
-    term: int = 48
-    mileage: int = 5000
-    initial_months: int = 12
-    initial_amount: str = ""
-    monthly_price: str = ""
-    vat_status: str = "inc VAT"
-    agreed_terms: bool = True
-
-@app.post("/api/enquire")
-def submit_enquiry(req: EnquiryRequest):
-    timestamp_uk = datetime.now(ZoneInfo("Europe/London")).strftime("%d %b %Y at %H:%M:%S %Z")
-
-    customer_number = "Guest (Not signed in)"
-    first_name, last_name, phone, address = req.first_name, req.last_name, req.phone, req.address
-
-    if req.is_logged_in:
-        # Query your Azure SQL Customers table by req.email
-        # Adjust column names to match your exact schema (e.g., CustomerID, FirstName, LastName, Phone, Address)
-        cursor.execute(
-            "SELECT CustomerID, FirstName, LastName, Phone, Address FROM Customers WHERE Email = %s",
-            (req.email,),
-        )
-        row = cursor.fetchone()
-        if row:
-            customer_number = str(row["CustomerID"])
-            first_name = row["FirstName"] or first_name
-            last_name = row["LastName"] or last_name
-            phone = row["Phone"] or phone
-            address = row["Address"] or address
-
-    html = f"""
-    <h2>New Vehicle Lease Enquiry</h2>
-    <p><strong>Received:</strong> {timestamp_uk}</p>
-    <h3>Customer Details</h3>
-    <ul>
-      <li><strong>Customer Number:</strong> {customer_number}</li>
-      <li><strong>Name:</strong> {first_name} {last_name}</li>
-      <li><strong>Email:</strong> {req.email}</li>
-      <li><strong>Phone:</strong> {phone}</li>
-      <li><strong>Address:</strong> {address}</li>
-    </ul>
-    <h3>Vehicle &amp; Deal Summary</h3>
-    <ul>
-      <li><strong>Vehicle:</strong> {req.make} {req.model} — {req.derivative}</li>
-      <li><strong>Type / CAP Code:</strong> {req.vehicle_type.upper()} / {req.cap_code}</li>
-      <li><strong>Monthly Rental:</strong> {req.monthly_price}/mo ({req.vat_status})</li>
-      <li><strong>Initial Rental:</strong> {req.initial_months} months ({req.initial_amount})</li>
-      <li><strong>Contract Term:</strong> {req.term} months</li>
-      <li><strong>Annual Mileage:</strong> {req.mileage:,} miles/yr</li>
-    </ul>
-    """
-
-    send_email(
-        to=ENQUIRIES_TO,
-        subject=f"New Enquiry: {req.make} {req.model} ({req.monthly_price}/mo {req.vat_status})",
-        html=html,
-        reply_to=req.email,
-    )
-    return {"status": "sent", "timestamp": timestamp_uk}
-
-EMAIL_API_KEY = os.getenv("EMAIL_API_KEY")
+EMAIL_API_KEY = os.getenv("EMAIL_API_KEY", "")
 NOREPLY_FROM = os.getenv("NOREPLY_FROM_EMAIL", "Leasio <noreply@leasio.co.uk>")
 ENQUIRIES_TO = os.getenv("ENQUIRIES_TO_EMAIL", "enquiries@leasio.co.uk")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://leasio.co.uk")
+
+
+def get_db_connection():
+    db_password = os.getenv("SQL_USER_PASSWORD", "")
+    return pymssql.connect(
+        server="leasio-server.database.windows.net",
+        user="leasio_user@leasio-server",
+        password=db_password,
+        database="Leasio_database",
+    )
+
 
 def send_email(to: str, subject: str, html: str, reply_to: str | None = None):
-    payload = {"from": NOREPLY_FROM, "to": [to], "subject": subject, "html": html}
+    payload = {
+        "from": NOREPLY_FROM,
+        "to": [to],
+        "subject": subject,
+        "html": html,
+    }
     if reply_to:
         payload["reply_to"] = reply_to
+
     res = requests.post(
         "https://api.resend.com/emails",
-        headers={"Authorization": f"Bearer {EMAIL_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {EMAIL_API_KEY}",
+            "Content-Type": "application/json",
+        },
         json=payload,
         timeout=10,
     )
     res.raise_for_status()
+
+
+def hash_reset_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 VEHICLE_CACHE = {
     "car": [],
@@ -818,17 +770,262 @@ def delete_quote(req: DeleteQuoteRequest):
         raise HTTPException(status_code=500, detail=str(e))
         
 class EnquiryRequest(BaseModel):
-    first_name: str
-    last_name: str
-    phone: str
+    is_logged_in: bool = False
+    customer_id: Optional[str] = None
+    first_name: str = ""
+    last_name: str = ""
     email: str
-    agreed_terms: bool
-    cap_code: str = ""
+    phone: str = ""
+    address: str = ""
+    cap_code: str
     vehicle_type: str = "car"
+    make: str = ""
+    model: str = ""
+    derivative: str = ""
+    term: int = 48
+    mileage: int = 5000
+    initial_months: int = 12
+    initial_amount: str = ""
+    monthly_price: str = ""
+    vat_status: str = "inc VAT"
+    agreed_terms: bool = True
+
 
 @app.post("/api/enquire")
 def submit_enquiry(req: EnquiryRequest):
     if not req.agreed_terms:
         raise HTTPException(status_code=400, detail="You must agree to the terms and conditions.")
-    # Optional: insert into a dbo.Enquiries table in Azure SQL using pymssql and %s placeholders
-    return {"success": True, "message": "Enquiry received."}
+
+    timestamp_uk = datetime.now(ZoneInfo("Europe/London")).strftime("%d %b %Y at %H:%M:%S %Z")
+
+    customer_number = "Guest (Not signed in)"
+    first_name = req.first_name.strip()
+    last_name = req.last_name.strip()
+    phone = req.phone.strip()
+    address = req.address.strip()
+    email = req.email.strip()
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if req.is_logged_in and email:
+            cursor.execute(
+                """
+                SELECT
+                    CAST(CustomerID AS VARCHAR(36)),
+                    FirstName,
+                    LastName,
+                    CAST(PhoneEncrypted AS VARCHAR(MAX)),
+                    CAST(AddressEncrypted AS VARCHAR(MAX))
+                FROM dbo.Customers
+                WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
+                """,
+                (email,),
+            )
+            row = cursor.fetchone()
+            if row:
+                customer_number = str(row[0])
+                first_name = row[1] or first_name
+                last_name = row[2] or last_name
+                phone = row[3] or phone
+                address = row[4] or address
+
+        conn.close()
+        conn = None
+
+        html = f"""
+        <h2>New Vehicle Lease Enquiry</h2>
+        <p><strong>Received:</strong> {timestamp_uk}</p>
+        <h3>Customer Details</h3>
+        <ul>
+          <li><strong>Customer Number:</strong> {customer_number}</li>
+          <li><strong>Name:</strong> {first_name} {last_name}</li>
+          <li><strong>Email:</strong> {email}</li>
+          <li><strong>Phone:</strong> {phone}</li>
+          <li><strong>Address:</strong> {address}</li>
+        </ul>
+        <h3>Vehicle &amp; Deal Summary</h3>
+        <ul>
+          <li><strong>Vehicle:</strong> {req.make} {req.model} — {req.derivative}</li>
+          <li><strong>Type / CAP Code:</strong> {req.vehicle_type.upper()} / {req.cap_code}</li>
+          <li><strong>Monthly Rental:</strong> {req.monthly_price}/mo ({req.vat_status})</li>
+          <li><strong>Initial Rental:</strong> {req.initial_months} months ({req.initial_amount})</li>
+          <li><strong>Contract Term:</strong> {req.term} months</li>
+          <li><strong>Annual Mileage:</strong> {req.mileage:,} miles/yr</li>
+        </ul>
+        """
+
+        send_email(
+            to=ENQUIRIES_TO,
+            subject=f"New Enquiry: {req.make} {req.model} ({req.monthly_price}/mo {req.vat_status})",
+            html=html,
+            reply_to=email if email else None,
+        )
+        return {"success": True, "message": "Enquiry received.", "timestamp": timestamp_uk}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"Enquiry error: {e}")
+        raise HTTPException(status_code=500, detail="Could not send enquiry. Please try again.")
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    generic_msg = {"success": True, "message": "If an account exists for that email, a reset link has been sent."}
+    email = req.email.strip()
+    if not email:
+        return generic_msg
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT CAST(CustomerID AS VARCHAR(36))
+            FROM dbo.Customers
+            WHERE EmailEncrypted = CAST(%s AS VARBINARY(MAX))
+            """,
+            (email,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return generic_msg
+
+        customer_id = row[0]
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hash_reset_token(raw_token)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+
+        # Invalidate any prior unused tokens for this customer
+        cursor.execute(
+            """
+            UPDATE dbo.PasswordResetTokens
+            SET Used = 1
+            WHERE CAST(CustomerID AS VARCHAR(36)) = %s AND Used = 0
+            """,
+            (customer_id,),
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO dbo.PasswordResetTokens (CustomerID, TokenHash, ExpiresAt, Used)
+            VALUES (CAST(%s AS UNIQUEIDENTIFIER), %s, %s, 0)
+            """,
+            (customer_id, token_hash, expires_at),
+        )
+        conn.commit()
+        conn.close()
+        conn = None
+
+        reset_link = f"{FRONTEND_URL}/reset-password.html?token={raw_token}"
+        html = f"""
+        <h2>Reset Your Leasio Password</h2>
+        <p>We received a request to reset the password for your Leasio account.</p>
+        <p><a href="{reset_link}">Click here to set a new password</a></p>
+        <p>This link expires in 30 minutes. If you did not request a reset, you can safely ignore this email.</p>
+        """
+
+        send_email(
+            to=email,
+            subject="Reset your Leasio password",
+            html=html,
+        )
+        return generic_msg
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"Forgot password error: {e}")
+        raise HTTPException(status_code=500, detail="Could not process password reset request.")
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@app.post("/api/reset-password")
+def reset_password(req: ResetPasswordRequest):
+    if not req.token or len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Invalid token or password must be at least 8 characters.")
+
+    token_hash = hash_reset_token(req.token.strip())
+    now_utc = datetime.now(timezone.utc)
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT TokenID, CAST(CustomerID AS VARCHAR(36)), ExpiresAt, Used
+            FROM dbo.PasswordResetTokens
+            WHERE TokenHash = %s
+            """,
+            (token_hash,),
+        )
+        token_row = cursor.fetchone()
+
+        if not token_row:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Invalid or expired password reset link.")
+
+        token_id, customer_id, expires_at, used = token_row[0], token_row[1], token_row[2], bool(token_row[3])
+
+        if used:
+            conn.close()
+            raise HTTPException(status_code=400, detail="This password reset link has already been used.")
+
+        # Normalize naive SQL datetime2 as UTC for comparison
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        if now_utc > expires_at:
+            conn.close()
+            raise HTTPException(status_code=400, detail="This password reset link has expired.")
+
+        salt = bcrypt.gensalt()
+        new_hash = bcrypt.hashpw(req.new_password.encode("utf-8"), salt).decode("utf-8")
+
+        cursor.execute(
+            """
+            UPDATE dbo.Customers
+            SET PasswordHash = %s
+            WHERE CAST(CustomerID AS VARCHAR(36)) = %s
+            """,
+            (new_hash, customer_id),
+        )
+
+        cursor.execute(
+            """
+            UPDATE dbo.PasswordResetTokens
+            SET Used = 1
+            WHERE TokenID = %s
+            """,
+            (token_id,),
+        )
+
+        conn.commit()
+        conn.close()
+        return {"success": True, "message": "Password updated successfully."}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"Reset password error: {e}")
+        raise HTTPException(status_code=500, detail="Could not reset password.")
