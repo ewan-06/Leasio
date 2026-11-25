@@ -4,3 +4,4 @@ pymssql
 bcrypt
 pydantic[email]
 sqlalchemy
+requests
