@@ -931,11 +931,20 @@ def forgot_password(req: ForgotPasswordRequest):
         conn.close()
         conn = None
 
-        reset_link = f"{FRONTEND_URL}/reset-password.html?token={raw_token}"
+        base_url = FRONTEND_URL.rstrip("/")
+        if not base_url.startswith(("http://", "https://")):
+            base_url = f"https://{base_url}"
+
+        reset_link = f"{base_url}/reset-password.html?token={raw_token}"
         html = f"""
         <h2>Reset Your Leasio Password</h2>
         <p>We received a request to reset the password for your Leasio account.</p>
-        <p><a href="{reset_link}"<br>>Click here to set a new password</a></p>
+        <p>
+          <a href="{reset_link}" style="color: #2563eb; font-weight: 600; text-decoration: underline;">
+            Click here to set a new password
+          </a>
+        </p>
+        <br>
         <p>This link expires in 30 minutes. If you did not request a reset, you can safely ignore this email.</p>
         """
 
