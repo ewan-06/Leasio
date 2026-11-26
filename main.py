@@ -908,7 +908,7 @@ def forgot_password(req: ForgotPasswordRequest):
         customer_id = row[0]
         raw_token = secrets.token_urlsafe(32)
         token_hash = hash_reset_token(raw_token)
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=30)
 
         # Invalidate any prior unused tokens for this customer
         cursor.execute(
