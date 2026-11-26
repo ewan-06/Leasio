@@ -25,17 +25,6 @@ PII_ENCRYPTION_KEY = os.getenv("PII_ENCRYPTION_KEY", "").strip()
 _fernet = Fernet(PII_ENCRYPTION_KEY.encode("utf-8")) if PII_ENCRYPTION_KEY else None
 
 
-def encrypt_pii(value: str) -> bytes:
-    """Encrypts sensitive customer fields (email, phone, address) into UTF-8 bytes."""
-    clean = (value or "").strip()
-    if not clean:
-        return b""
-    if _fernet:
-        return _fernet.encrypt(clean.encode("utf-8"))
-    # Fallback if PII_ENCRYPTION_KEY is not configured yet
-    return clean.encode("utf-16-le")
-
-
 def encrypt_pii(value: str):
     """Encrypts sensitive customer fields (email, phone, address) for VARBINARY(MAX)."""
     clean = (value or "").strip()
@@ -45,6 +34,21 @@ def encrypt_pii(value: str):
         return pymssql.Binary(_fernet.encrypt(clean.encode("utf-8")))
     return pymssql.Binary(clean.encode("utf-16-le"))
 
+def decrypt_pii(value) -> str:
+    """Decrypts Fernet-encrypted values and falls back to UTF-16LE for legacy rows."""
+    if value is None:
+        return ""
+    raw_bytes = bytes(value) if isinstance(value, (bytes, bytearray)) else str(value).encode("utf-8")
+    if not raw_bytes:
+        return ""
+    if _fernet:
+        try:
+            return _fernet.decrypt(raw_bytes).decode("utf-8").strip()
+        except InvalidToken:
+            pass
+    if b"\x00" in raw_bytes:
+        return raw_bytes.decode("utf-16-le", errors="replace").rstrip("\x00").strip()
+    return raw_bytes.decode("utf-8", errors="replace").strip()
 
 def normalize_email(email: str) -> str:
     return (email or "").strip().lower()
@@ -109,7 +113,6 @@ def get_db_connection():
         password=db_password,
         database="Leasio_database",
     )
-
 
 def send_email(to: str, subject: str, html: str, reply_to: str | None = None, text: str | None = None):
     payload = {
