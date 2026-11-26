@@ -36,25 +36,14 @@ def encrypt_pii(value: str) -> bytes:
     return clean.encode("utf-16-le")
 
 
-def decrypt_pii(value) -> str:
-    """Decrypts Fernet-encrypted values and falls back to UTF-16LE for legacy rows."""
-    if value is None:
-        return ""
-    raw_bytes = bytes(value) if isinstance(value, (bytes, bytearray)) else str(value).encode("utf-8")
-    if not raw_bytes:
-        return ""
-
+def encrypt_pii(value: str):
+    """Encrypts sensitive customer fields (email, phone, address) for VARBINARY(MAX)."""
+    clean = (value or "").strip()
+    if not clean:
+        return pymssql.Binary(b"")
     if _fernet:
-        try:
-            return _fernet.decrypt(raw_bytes).decode("utf-8").strip()
-        except InvalidToken:
-            pass
-
-    # Legacy UTF-16LE fallback (from CAST(... AS VARBINARY(MAX)) in SQL Server)
-    if b"\x00" in raw_bytes:
-        return raw_bytes.decode("utf-16-le", errors="replace").rstrip("\x00").strip()
-
-    return raw_bytes.decode("utf-8", errors="replace").strip()
+        return pymssql.Binary(_fernet.encrypt(clean.encode("utf-8")))
+    return pymssql.Binary(clean.encode("utf-16-le"))
 
 
 def normalize_email(email: str) -> str:
@@ -597,7 +586,9 @@ def register_customer(request: RegisterRequest):
             )
             VALUES (
                 %s, %s, %s,
-                %s, %s, %s,
+                CONVERT(VARBINARY(MAX), %s),
+                CONVERT(VARBINARY(MAX), %s),
+                CONVERT(VARBINARY(MAX), %s),
                 %s
             )
             """,
