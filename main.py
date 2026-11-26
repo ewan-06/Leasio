@@ -49,6 +49,8 @@ def send_email(to: str, subject: str, html: str, reply_to: str | None = None):
         json=payload,
         timeout=10,
     )
+    if not res.ok:
+        print(f"Resend API error ({res.status_code}): {res.text}")
     res.raise_for_status()
 
 
@@ -933,7 +935,7 @@ def forgot_password(req: ForgotPasswordRequest):
         html = f"""
         <h2>Reset Your Leasio Password</h2>
         <p>We received a request to reset the password for your Leasio account.</p>
-        <p><a href="{reset_link}">Click here to set a new password</a></p>
+        <p><a href="{reset_link}"<br>>Click here to set a new password</a></p>
         <p>This link expires in 30 minutes. If you did not request a reset, you can safely ignore this email.</p>
         """
 
