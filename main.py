@@ -15,6 +15,7 @@ import time
 import pymssql
 import bcrypt
 import requests
+import re
 
 EMAIL_API_KEY = os.getenv("EMAIL_API_KEY", "")
 NOREPLY_FROM = os.getenv("NOREPLY_FROM_EMAIL", "Leasio <noreply@leasio.co.uk>")
@@ -104,6 +105,53 @@ def find_customer_by_email(cursor, email: str):
             return candidate
     return None
 
+def normalize_phone(value: str) -> str:
+    if not value:
+        return ""
+    digits = re.sub(r"\D", "", str(value).strip())
+    # Normalize UK +44 / 0044 trunk prefix so +447123456789 and 07123456789 match
+    if digits.startswith("0044"):
+        digits = "0" + digits[4:]
+    elif digits.startswith("44") and len(digits) >= 11:
+        digits = "0" + digits[2:]
+    return digits
+
+
+def find_customer_by_identifier(cursor, identifier: str):
+    cleaned = (identifier or "").strip()
+    if not cleaned:
+        return None
+
+    target_email = normalize_email(cleaned)
+    target_phone = normalize_phone(cleaned)
+    is_email_attempt = "@" in cleaned
+
+    cursor.execute(
+        """
+        SELECT
+            CAST(CustomerID AS VARCHAR(36)),
+            FirstName,
+            LastName,
+            EmailEncrypted,
+            PhoneEncrypted,
+            AddressEncrypted,
+            PasswordHash
+        FROM dbo.Customers
+        """
+    )
+
+    for row in cursor.fetchall():
+        decrypted_email = decrypt_pii(row[3])
+        decrypted_phone = decrypt_pii(row[4])
+
+        if is_email_attempt:
+            if target_email and normalize_email(decrypted_email) == target_email:
+                return row
+        else:
+            if target_phone and normalize_phone(decrypted_phone) == target_phone:
+                return row
+
+    return None
 
 def get_db_connection():
     db_password = os.getenv("SQL_USER_PASSWORD", "")
@@ -618,35 +666,47 @@ def register_customer(request: RegisterRequest):
 
 
 class LoginRequest(BaseModel):
-    email: str
+    identifier: Optional[str] = None
+    email: Optional[str] = None
     password: str
 
 
 @app.post("/api/login")
 def login_customer(request: LoginRequest):
     try:
+        raw_identifier = (request.identifier or request.email or "").strip()
+        if not raw_identifier:
+            raise HTTPException(status_code=400, detail="Please enter your email address or phone number.")
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        row = find_customer_by_email(cursor, request.email)
+        row = find_customer_by_identifier(cursor, raw_identifier)
         conn.close()
 
         if not row:
-            raise HTTPException(status_code=401, detail="Invalid email or password.")
+            raise HTTPException(status_code=401, detail="Invalid email/phone number or password.")
 
         first_name, last_name, stored_hash = row[1], row[2], row[6]
         stored_hash_bytes = stored_hash if isinstance(stored_hash, bytes) else str(stored_hash).encode("utf-8")
 
         if not bcrypt.checkpw(request.password.encode("utf-8"), stored_hash_bytes):
-            raise HTTPException(status_code=401, detail="Invalid email or password.")
+            raise HTTPException(status_code=401, detail="Invalid email/phone number or password.")
+
+        decrypted_email = decrypt_pii(row[3]) or (raw_identifier if "@" in raw_identifier else "")
+        decrypted_phone = decrypt_pii(row[4]) or ""
+        decrypted_address = decrypt_pii(row[5]) or ""
 
         return {
             "success": True,
             "message": "Login successful.",
             "user": {
-                "first_name": first_name,
-                "last_name": last_name,
-                "email": request.email.strip(),
+                "customer_id": str(row[0]),
+                "first_name": first_name or "",
+                "last_name": last_name or "",
+                "email": decrypted_email,
+                "phone": decrypted_phone,
+                "address": decrypted_address,
             },
         }
 
