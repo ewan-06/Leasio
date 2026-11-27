@@ -1068,3 +1068,174 @@ def reset_password(req: ResetPasswordRequest):
             conn.close()
         print(f"Reset password error: {e}")
         raise HTTPException(status_code=500, detail="Could not reset password.")
+
+class UpdateAccountRequest(BaseModel):
+    current_email: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+
+
+@app.get("/api/account")
+def get_account_details(email: str):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        row = find_customer_by_email(cursor, email)
+        conn.close()
+        conn = None
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Customer not found.")
+
+        return {
+            "success": True,
+            "user": {
+                "customer_id": str(row[0]),
+                "first_name": row[1] or "",
+                "last_name": row[2] or "",
+                "email": decrypt_pii(row[3]) or email.strip(),
+                "phone": decrypt_pii(row[4]) or "",
+                "address": decrypt_pii(row[5]) or "",
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"Get Account Error: {e}")
+        raise HTTPException(status_code=500, detail="Could not load account details.")
+
+
+@app.post("/api/update_account")
+def update_account_details(req: UpdateAccountRequest):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        user_row = find_customer_by_email(cursor, req.current_email)
+        if not user_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Customer not found.")
+
+        customer_id = str(user_row[0])
+        existing_first = user_row[1] or ""
+        existing_last = user_row[2] or ""
+        existing_email = decrypt_pii(user_row[3])
+        existing_phone = decrypt_pii(user_row[4])
+        existing_address = decrypt_pii(user_row[5])
+        stored_hash = user_row[6]
+
+        # If changing password, verify current_password first
+        if req.new_password:
+            if len(req.new_password) < 8:
+                conn.close()
+                raise HTTPException(status_code=400, detail="New password must be at least 8 characters.")
+            if not req.current_password:
+                conn.close()
+                raise HTTPException(status_code=400, detail="Please enter your current password to set a new one.")
+
+            stored_hash_bytes = (
+                stored_hash if isinstance(stored_hash, bytes) else str(stored_hash).encode("utf-8")
+            )
+            if not bcrypt.checkpw(req.current_password.encode("utf-8"), stored_hash_bytes):
+                conn.close()
+                raise HTTPException(status_code=401, detail="Current password is incorrect.")
+
+        next_first = req.first_name.strip() if req.first_name is not None else existing_first
+        next_last = req.last_name.strip() if req.last_name is not None else existing_last
+        next_email = req.email.strip() if req.email is not None else existing_email
+        next_phone = req.phone.strip() if req.phone is not None else existing_phone
+        next_address = req.address.strip() if req.address is not None else existing_address
+
+        if not next_email:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Email address is required.")
+
+        target_email_norm = normalize_email(next_email)
+        target_phone_clean = next_phone.strip()
+
+        # Prevent duplicate email or phone across other accounts
+        cursor.execute(
+            """
+            SELECT CAST(CustomerID AS VARCHAR(36)), EmailEncrypted, PhoneEncrypted
+            FROM dbo.Customers
+            WHERE CAST(CustomerID AS VARCHAR(36)) <> %s
+            """,
+            (customer_id,),
+        )
+        for other in cursor.fetchall():
+            other_email = normalize_email(decrypt_pii(other[1]))
+            other_phone = decrypt_pii(other[2]).strip()
+            if target_email_norm and other_email == target_email_norm:
+                conn.close()
+                raise HTTPException(status_code=400, detail="Another account already uses this email address.")
+            if target_phone_clean and other_phone == target_phone_clean:
+                conn.close()
+                raise HTTPException(status_code=400, detail="Another account already uses this phone number.")
+
+        enc_email = encrypt_pii(next_email)
+        enc_phone = encrypt_pii(next_phone)
+        enc_address = encrypt_pii(next_address)
+
+        if req.new_password:
+            new_hash = bcrypt.hashpw(req.new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            cursor.execute(
+                """
+                UPDATE dbo.Customers
+                SET FirstName = %s,
+                    LastName = %s,
+                    EmailEncrypted = CONVERT(VARBINARY(MAX), %s),
+                    PhoneEncrypted = CONVERT(VARBINARY(MAX), %s),
+                    AddressEncrypted = CONVERT(VARBINARY(MAX), %s),
+                    PasswordHash = %s
+                WHERE CAST(CustomerID AS VARCHAR(36)) = %s
+                """,
+                (next_first, next_last, enc_email, enc_phone, enc_address, new_hash, customer_id),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE dbo.Customers
+                SET FirstName = %s,
+                    LastName = %s,
+                    EmailEncrypted = CONVERT(VARBINARY(MAX), %s),
+                    PhoneEncrypted = CONVERT(VARBINARY(MAX), %s),
+                    AddressEncrypted = CONVERT(VARBINARY(MAX), %s)
+                WHERE CAST(CustomerID AS VARCHAR(36)) = %s
+                """,
+                (next_first, next_last, enc_email, enc_phone, enc_address, customer_id),
+            )
+
+        conn.commit()
+        conn.close()
+        conn = None
+
+        return {
+            "success": True,
+            "message": "Account details updated.",
+            "user": {
+                "customer_id": customer_id,
+                "first_name": next_first,
+                "last_name": next_last,
+                "email": next_email,
+                "phone": next_phone,
+                "address": next_address,
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"Update Account Error: {e}")
+        raise HTTPException(status_code=500, detail="Could not update account details.")
